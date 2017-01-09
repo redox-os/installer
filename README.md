@@ -42,14 +42,9 @@ redox_installer = "0.1"
 // src/main.rs
 extern crate redox_installer;
 
-use std::io;
-
-fn main() {
-    let stdout = io::stdout();
-    let mut stdout = stdout.lock();
-    
+fn main() {    
     let mut config = redox_installer::Config::default();
     ...
-    redox_installer::install(&mut stdout, &config);
+    redox_installer::install(config);
 }
 ```
