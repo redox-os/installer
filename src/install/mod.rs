@@ -74,7 +74,7 @@ pub fn install(config: Config) -> Result<(), String> {
                 Err(err) => Err(err)
             }
         } else {
-            Ok($def)
+            Ok($dst.unwrap_or($def))
         })
     }
 
@@ -105,11 +105,15 @@ pub fn install(config: Config) -> Result<(), String> {
     }
 
     dir!("");
+    dir!("bin");
     dir!("etc");
     dir!("home");
 
-    let mut passwd = String::new();
+    for file in config.files {
+        file!(file.path.trim_matches('/'), file.data.as_bytes());
+    }
 
+    let mut passwd = String::new();
     let mut next_uid = 1000;
     for (username, user) in config.users {
         let password = if let Some(password) = user.password {
@@ -144,7 +148,6 @@ pub fn install(config: Config) -> Result<(), String> {
 
         passwd.push_str(&format!("{};{};{};{};{};{};{}\n", username, password, uid, gid, name, home, shell));
     }
-
     file!("etc/passwd", passwd.as_bytes());
 
     Ok(())
