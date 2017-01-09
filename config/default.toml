@@ -3,7 +3,7 @@
 # General settings
 [general]
 # Prompt if settings are not defined
-prompt = true
+prompt = false
 
 # Package settings
 [packages]
@@ -11,8 +11,11 @@ orbutils = {}
 
 # User settings
 [users.root]
+password = "$argon2i$m=4096,t=10,p=1$Tnc4UVV0N00$ML9LIOujd3nmAfkAwEcSTMPqakWUF0OUiLWrIy0nGLk"
 uid = 0
 gid = 0
+name = "root"
 home = "/root"
 
 [users.user]
+password = ""
