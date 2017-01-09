@@ -1,0 +1,20 @@
+[package]
+name = "redox_installer"
+version = "0.1.0"
+
+[[bin]]
+name = "redox_installer"
+path = "src/bin/installer.rs"
+
+[lib]
+name = "redox_installer"
+path = "src/lib.rs"
+
+[dependencies]
+liner = "0.1"
+rand = "0.3"
+serde = "0.8"
+serde_derive = "0.8"
+termion = "1.1"
+toml = { version = "0.2", default-features = false, features = ["serde"] }
+userutils = { git = "https://github.com/redox-os/userutils.git" }

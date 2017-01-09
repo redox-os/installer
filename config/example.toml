@@ -1,0 +1,17 @@
+# This is an example configuration file
+
+# General settings
+[general]
+# Prompt if settings are not defined
+prompt = true
+
+# Package settings
+[packages]
+orbutils = {}
+
+# User settings
+[users.root]
+uid = 0
+gid = 0
+
+[users.user]
