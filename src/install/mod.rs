@@ -8,7 +8,6 @@ use self::termion::input::TermRead;
 
 use std::{env, fs};
 use std::io::{self, Write};
-use std::path::Path;
 use std::str::FromStr;
 
 use config::Config;
@@ -59,19 +58,6 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String, String>
     }
 }
 
-pub fn dir(path: &Path) -> Result<(), String> {
-    println!("Create directory {}", path.display());
-    fs::create_dir(path).map_err(|err| format!("failed to create {}: {}", path.display(), err))?;
-    Ok(())
-}
-
-pub fn file(path: &Path, data: &[u8]) -> Result<(), String> {
-    println!("Create file {}", path.display());
-    let mut file = fs::File::create(path).map_err(|err| format!("failed to create {}: {}", path.display(), err))?;
-    file.write_all(data).map_err(|err| format!("failed to write {}: {}", path.display(), err))?;
-    Ok(())
-}
-
 pub fn install(config: Config) -> Result<(), String> {
     println!("Install {:#?}", config);
 
@@ -99,7 +85,28 @@ pub fn install(config: Config) -> Result<(), String> {
         wd
     };
 
-    println!("Using sysroot: {}", sysroot.display());
+    macro_rules! dir {
+        ($path:expr) => {{
+            let mut path = sysroot.clone();
+            path.push($path);
+            println!("Create directory {}", path.display());
+            fs::create_dir(&path).map_err(|err| format!("failed to create {}: {}", path.display(), err))?;
+        }};
+    }
+
+    macro_rules! file {
+        ($path:expr, $data:expr) => {{
+            let mut path = sysroot.clone();
+            path.push($path);
+            println!("Create file {}", path.display());
+            let mut file = fs::File::create(&path).map_err(|err| format!("failed to create {}: {}", path.display(), err))?;
+            file.write_all($data).map_err(|err| format!("failed to write {}: {}", path.display(), err))?;
+        }};
+    }
+
+    dir!("");
+    dir!("etc");
+    dir!("home");
 
     let mut passwd = String::new();
 
@@ -133,18 +140,12 @@ pub fn install(config: Config) -> Result<(), String> {
         println!("\tHome: {}", home);
         println!("\tShell: {}", shell);
 
+        dir!(home.trim_matches('/'));
+
         passwd.push_str(&format!("{};{};{};{};{};{};{}\n", username, password, uid, gid, name, home, shell));
     }
 
-    dir(&sysroot)?;
-
-    let mut etc = sysroot.clone();
-    etc.push("etc");
-    dir(&etc)?;
-
-    let mut etc_passwd = etc.clone();
-    etc_passwd.push("passwd");
-    file(&etc_passwd, passwd.as_bytes())?;
+    file!("etc/passwd", passwd.as_bytes());
 
     Ok(())
 }
