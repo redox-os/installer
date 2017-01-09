@@ -63,14 +63,6 @@ pub fn install(config: Config) -> Result<(), String> {
     let mut context = liner::Context::new();
 
     macro_rules! prompt {
-        ($dst:expr, $($arg:tt)*) => (if config.general.prompt {
-            unwrap_or_prompt($dst, &mut context, &format!($($arg)*))
-        } else {
-            Ok($dst.unwrap_or_default())
-        })
-    }
-
-    macro_rules! prompt_default {
         ($dst:expr, $def:expr, $($arg:tt)*) => (if config.general.prompt {
             match unwrap_or_prompt($dst, &mut context, &format!($($arg)*)) {
                 Ok(res) => if res.is_empty() {
@@ -105,9 +97,9 @@ pub fn install(config: Config) -> Result<(), String> {
 
         let gid = user.gid.unwrap_or(uid);
 
-        let name = prompt_default!(user.name, username.clone(), "{}: name: ", username)?;
-        let home = prompt_default!(user.home, format!("/home/{}", username), "{}: home: ", username)?;
-        let shell = prompt_default!(user.shell, "/bin/ion".to_string(), "{}: shell: ", username)?;
+        let name = prompt!(user.name, username.clone(), "{}: name [{}]: ", username, username)?;
+        let home = prompt!(user.home, format!("/home/{}", username), "{}: home [/home/{}]: ", username, username)?;
+        let shell = prompt!(user.shell, "/bin/ion".to_string(), "{}: shell [/bin/ion]: ", username)?;
 
         println!("Creating user {}:", username);
         println!("\tPassword: {}", password);
