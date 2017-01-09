@@ -7,7 +7,16 @@ prompt = false
 
 # Package settings
 [packages]
+acid = {}
+coreutils = {}
+extrautils = {}
+games = {}
+ion = {}
+netutils = {}
+pkgutils = {}
 orbutils = {}
+smith = {}
+userutils = {}
 
 # User settings
 [users.root]

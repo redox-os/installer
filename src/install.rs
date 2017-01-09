@@ -6,7 +6,9 @@ extern crate userutils;
 use self::rand::Rng;
 use self::termion::input::TermRead;
 
+use std::{env, fs};
 use std::io::{self, Write};
+use std::path::Path;
 use std::str::FromStr;
 
 use config::Config;
@@ -57,6 +59,19 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String, String>
     }
 }
 
+pub fn dir(path: &Path) -> Result<(), String> {
+    println!("Create directory {}", path.display());
+    fs::create_dir(path).map_err(|err| format!("failed to create {}: {}", path.display(), err))?;
+    Ok(())
+}
+
+pub fn file(path: &Path, data: &[u8]) -> Result<(), String> {
+    println!("Create file {}", path.display());
+    let mut file = fs::File::create(path).map_err(|err| format!("failed to create {}: {}", path.display(), err))?;
+    file.write_all(data).map_err(|err| format!("failed to write {}: {}", path.display(), err))?;
+    Ok(())
+}
+
 pub fn install(config: Config) -> Result<(), String> {
     println!("Install {:#?}", config);
 
@@ -76,6 +91,15 @@ pub fn install(config: Config) -> Result<(), String> {
             Ok($def)
         })
     }
+
+    let sysroot = {
+        let mut wd = env::current_dir().map_err(|err| format!("failed to get current dir: {}", err))?;
+        let path = prompt!(config.general.sysroot, "sysroot".to_string(), "sysroot [sysroot]: ")?;
+        wd.push(path);
+        wd
+    };
+
+    println!("Using sysroot: {}", sysroot.display());
 
     let mut passwd = String::new();
 
@@ -101,7 +125,7 @@ pub fn install(config: Config) -> Result<(), String> {
         let home = prompt!(user.home, format!("/home/{}", username), "{}: home [/home/{}]: ", username, username)?;
         let shell = prompt!(user.shell, "/bin/ion".to_string(), "{}: shell [/bin/ion]: ", username)?;
 
-        println!("Creating user {}:", username);
+        println!("Adding user {}:", username);
         println!("\tPassword: {}", password);
         println!("\tUID: {}", uid);
         println!("\tGID: {}", gid);
@@ -112,7 +136,15 @@ pub fn install(config: Config) -> Result<(), String> {
         passwd.push_str(&format!("{};{};{};{};{};{};{}\n", username, password, uid, gid, name, home, shell));
     }
 
-    print!("/etc/passwd:\n{}", passwd);
+    dir(&sysroot)?;
+
+    let mut etc = sysroot.clone();
+    etc.push("etc");
+    dir(&etc)?;
+
+    let mut etc_passwd = etc.clone();
+    etc_passwd.push("passwd");
+    file(&etc_passwd, passwd.as_bytes())?;
 
     Ok(())
 }
