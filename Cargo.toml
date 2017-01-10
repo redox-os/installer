@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 liner = "0.1"
+pkgutils = { git = "https://github.com/redox-os/pkgutils.git" }
 rand = "0.3"
 serde = "0.8"
 serde_derive = "0.8"

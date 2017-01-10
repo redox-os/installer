@@ -1,4 +1,5 @@
 extern crate liner;
+extern crate pkgutils;
 extern crate rand;
 extern crate tar;
 extern crate termion;
@@ -11,7 +12,7 @@ use self::termion::input::TermRead;
 use std::{env, fs};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::str::FromStr;
 
 use config::Config;
@@ -147,19 +148,22 @@ pub fn install(config: Config) -> Result<(), String> {
         }};
     }
 
-    macro_rules! pkg {
-        ($path:expr) => {{
-            let path = PathBuf::from($path);
-            println!("Extract package {}", path.display());
-            let file = fs::File::open(&path).map_err(|err| format!("failed to open {}: {}", path.display(), err))?;
-            extract_inner(&mut Archive::new(file), &sysroot).map_err(|err| format!("failed to extract {}: {}", path.display(), err))?;
-        }};
-    }
-
     dir!("");
 
     for (packagename, _package) in config.packages {
-        pkg!(&format!("../cookbook/repo/x86_64-unknown-redox/{}.tar", packagename));
+        let remote_path = format!("{}/{}.tar", pkgutils::REPO_REMOTE, $name);
+        let local_path = format!("pkg/{}.tar", $name);
+        if let Some(parent) = Path::new(&local_path).parent() {
+            println!("Create package repository {}", parent.display());
+            fs::create_dir_all(parent).map_err(|err| format!("failed to create package repository {}: {}", parent.display(), err))?;
+        }
+        println!("Download package {} to {}", remote_path, local_path);
+        pkgutils::download(&remote_path, &local_path).map_err(|err| format!("failed to download {} to {}: {}", remote_path, local_path, err))?;
+
+        let path = Path::new(&local_path);
+        println!("Extract package {}", path.display());
+        let file = fs::File::open(&path).map_err(|err| format!("failed to open {}: {}", path.display(), err))?;
+        extract_inner(&mut Archive::new(file), &sysroot).map_err(|err| format!("failed to extract {}: {}", path.display(), err))?;
     }
 
     for file in config.files {

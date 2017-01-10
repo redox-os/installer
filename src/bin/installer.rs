@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 extern crate redox_installer;
 extern crate serde;
 extern crate toml;
