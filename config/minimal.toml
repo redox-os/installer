@@ -7,18 +7,12 @@ prompt = false
 
 # Package settings
 [packages]
-acid = {}
 binutils = {}
 coreutils = {}
 extrautils = {}
-games = {}
 ion = {}
 netutils = {}
-orbdata = {}
-orbital = {}
-orbutils = {}
 pkgutils = {}
-smith = {}
 userutils = {}
 
 # User settings
@@ -29,7 +23,3 @@ uid = 0
 gid = 0
 name = "root"
 home = "/root"
-
-[users.user]
-# Password is unset
-password = ""

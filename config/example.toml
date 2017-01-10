@@ -7,7 +7,19 @@ prompt = true
 
 # Package settings
 [packages]
+acid = {}
+binutils = {}
+coreutils = {}
+extrautils = {}
+games = {}
+ion = {}
+netutils = {}
+orbdata = {}
+orbital = {}
 orbutils = {}
+pkgutils = {}
+smith = {}
+userutils = {}
 
 # User settings
 [users.root]

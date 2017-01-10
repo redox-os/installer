@@ -1,13 +1,17 @@
 extern crate liner;
 extern crate rand;
+extern crate tar;
 extern crate termion;
 extern crate userutils;
 
 use self::rand::Rng;
+use self::tar::{Archive, EntryType};
 use self::termion::input::TermRead;
 
 use std::{env, fs};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use config::Config;
@@ -58,6 +62,45 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String, String>
     }
 }
 
+fn extract_inner<T: Read>(ar: &mut Archive<T>, root: &Path) -> io::Result<()> {
+    for entry_result in try!(ar.entries()) {
+        let mut entry = try!(entry_result);
+        match entry.header().entry_type() {
+            EntryType::Regular => {
+                let mut file = {
+                    let mut path = root.to_path_buf();
+                    path.push(try!(entry.path()));
+                    println!("Extract file {}", path.display());
+                    if let Some(parent) = path.parent() {
+                        try!(fs::create_dir_all(parent));
+                    }
+                    try!(
+                        fs::OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .truncate(true)
+                            .create(true)
+                            .mode(entry.header().mode().unwrap_or(644))
+                            .open(path)
+                    )
+                };
+                try!(io::copy(&mut entry, &mut file));
+            },
+            EntryType::Directory => {
+                let mut path = root.to_path_buf();
+                path.push(try!(entry.path()));
+                println!("Extract directory {}", path.display());
+                try!(fs::create_dir_all(path));
+            },
+            other => {
+                panic!("Unsupported entry type {:?}", other);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub fn install(config: Config) -> Result<(), String> {
     println!("Install {:#?}", config);
 
@@ -90,7 +133,7 @@ pub fn install(config: Config) -> Result<(), String> {
             let mut path = sysroot.clone();
             path.push($path);
             println!("Create directory {}", path.display());
-            fs::create_dir(&path).map_err(|err| format!("failed to create {}: {}", path.display(), err))?;
+            fs::create_dir_all(&path).map_err(|err| format!("failed to create {}: {}", path.display(), err))?;
         }};
     }
 
@@ -104,10 +147,20 @@ pub fn install(config: Config) -> Result<(), String> {
         }};
     }
 
+    macro_rules! pkg {
+        ($path:expr) => {{
+            let path = PathBuf::from($path);
+            println!("Extract package {}", path.display());
+            let file = fs::File::open(&path).map_err(|err| format!("failed to open {}: {}", path.display(), err))?;
+            extract_inner(&mut Archive::new(file), &sysroot).map_err(|err| format!("failed to extract {}: {}", path.display(), err))?;
+        }};
+    }
+
     dir!("");
-    dir!("bin");
-    dir!("etc");
-    dir!("home");
+
+    for (packagename, _package) in config.packages {
+        pkg!(&format!("../cookbook/repo/x86_64-unknown-redox/{}.tar", packagename));
+    }
 
     for file in config.files {
         file!(file.path.trim_matches('/'), file.data.as_bytes());
