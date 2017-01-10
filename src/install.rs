@@ -142,6 +142,10 @@ pub fn install(config: Config) -> Result<(), String> {
         ($path:expr, $data:expr) => {{
             let mut path = sysroot.clone();
             path.push($path);
+            if let Some(parent) = path.parent() {
+                println!("Create file parent {}", parent.display());
+                fs::create_dir_all(parent).map_err(|err| format!("failed to create file parent {}: {}", parent.display(), err))?;
+            }
             println!("Create file {}", path.display());
             let mut file = fs::File::create(&path).map_err(|err| format!("failed to create {}: {}", path.display(), err))?;
             file.write_all($data).map_err(|err| format!("failed to write {}: {}", path.display(), err))?;
