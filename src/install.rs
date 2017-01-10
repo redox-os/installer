@@ -71,10 +71,11 @@ fn extract_inner<T: Read>(ar: &mut Archive<T>, root: &Path) -> io::Result<()> {
                 let mut file = {
                     let mut path = root.to_path_buf();
                     path.push(try!(entry.path()));
-                    println!("Extract file {}", path.display());
                     if let Some(parent) = path.parent() {
+                        println!("Extract file parent {}", parent.display());
                         try!(fs::create_dir_all(parent));
                     }
+                    println!("Extract file {}", path.display());
                     try!(
                         fs::OpenOptions::new()
                             .read(true)
