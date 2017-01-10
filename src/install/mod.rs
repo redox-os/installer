@@ -151,8 +151,8 @@ pub fn install(config: Config) -> Result<(), String> {
     dir!("");
 
     for (packagename, _package) in config.packages {
-        let remote_path = format!("{}/{}.tar", pkgutils::REPO_REMOTE, $name);
-        let local_path = format!("pkg/{}.tar", $name);
+        let remote_path = format!("{}/{}.tar", pkgutils::REPO_REMOTE, packagename);
+        let local_path = format!("pkg/{}.tar", packagename);
         if let Some(parent) = Path::new(&local_path).parent() {
             println!("Create package repository {}", parent.display());
             fs::create_dir_all(parent).map_err(|err| format!("failed to create package repository {}: {}", parent.display(), err))?;
