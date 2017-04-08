@@ -156,7 +156,7 @@ pub fn install(config: Config) -> Result<(), String> {
     dir!("");
 
     for (packagename, _package) in config.packages {
-        let remote_path = format!("{}/{}.tar", pkgutils::REPO_REMOTE, packagename);
+        let remote_path = format!("{}/{}/{}.tar", "https://static.redox-os.org/pkg", "x86_64-unknown-redox", packagename);
         let local_path = format!("pkg/{}.tar", packagename);
         if let Some(parent) = Path::new(&local_path).parent() {
             println!("Create package repository {}", parent.display());
