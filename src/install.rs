@@ -63,6 +63,17 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String, String>
     }
 }
 
+fn install_packages(config: &Config, dest: &str) {
+    let mut repo = Repo::new(TARGET);
+    repo.add_remote(REMOTE);
+    repo.set_dest(dest);
+
+    for (packagename, _package) in &config.packages {
+        println!("Installing package {}", packagename);
+        repo.install(&packagename).unwrap();
+    }
+}
+
 pub fn install(config: Config) -> Result<(), String> {
     println!("Install {:#?}", config);
 
@@ -85,7 +96,7 @@ pub fn install(config: Config) -> Result<(), String> {
 
     let sysroot = {
         let mut wd = env::current_dir().map_err(|err| format!("failed to get current dir: {}", err))?;
-        let path = prompt!(config.general.sysroot, "sysroot".to_string(), "sysroot [sysroot]: ")?;
+        let path = prompt!(config.general.sysroot.clone(), "sysroot".to_string(), "sysroot [sysroot]: ")?;
         wd.push(path);
         wd
     };
@@ -115,14 +126,7 @@ pub fn install(config: Config) -> Result<(), String> {
 
     dir!("");
 
-    let mut repo = Repo::new(TARGET);
-    repo.add_remote(REMOTE);
-    repo.set_dest(sysroot.to_str().unwrap());
-
-    for (packagename, _package) in config.packages {
-        println!("Installing package {}", packagename);
-        repo.install(&packagename).unwrap();
-    }
+    install_packages(&config, sysroot.to_str().unwrap());
 
     for file in config.files {
         file!(file.path.trim_matches('/'), file.data.as_bytes());
