@@ -9,8 +9,9 @@ use self::termion::input::TermRead;
 use self::pkgutils::Repo;
 
 use std::{env, fs};
-use std::io::{self, Write};
+use std::io::{self, stderr, Write};
 use std::str::FromStr;
+use std::process::{self, Command};
 
 use config::Config;
 
@@ -63,18 +64,40 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String, String>
     }
 }
 
-fn install_packages(config: &Config, dest: &str) {
+fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
     let mut repo = Repo::new(TARGET);
     repo.add_remote(REMOTE);
     repo.set_dest(dest);
 
-    for (packagename, _package) in &config.packages {
-        println!("Installing package {}", packagename);
-        repo.install(&packagename).unwrap();
+    if let Some(cookbook) = cookbook {
+        let status = Command::new("./update-packages.sh")
+            .current_dir(cookbook)
+            .args(config.packages.keys())
+            .spawn()
+            .unwrap()
+            .wait()
+            .unwrap();
+
+        if !status.success() {
+            write!(stderr(), "./update-package.sh failed.").unwrap();
+            process::exit(1);
+        }
+
+        for (packagename, _package) in &config.packages {
+            let path = format!("{}/{}/repo/{}/{}.tar",
+                               env::current_dir().unwrap().to_string_lossy(),
+                               cookbook, TARGET, packagename);
+            repo.install_file(&path).unwrap();
+        }
+    } else {
+        for (packagename, _package) in &config.packages {
+            println!("Installing package {}", packagename);
+            repo.install(&packagename).unwrap();
+        }
     }
 }
 
-pub fn install(config: Config) -> Result<(), String> {
+pub fn install(config: Config, cookbook: Option<&str>) -> Result<(), String> {
     println!("Install {:#?}", config);
 
     let mut context = liner::Context::new();
@@ -126,7 +149,7 @@ pub fn install(config: Config) -> Result<(), String> {
 
     dir!("");
 
-    install_packages(&config, sysroot.to_str().unwrap());
+    install_packages(&config, sysroot.to_str().unwrap(), cookbook);
 
     for file in config.files {
         file!(file.path.trim_matches('/'), file.data.as_bytes());
