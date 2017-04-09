@@ -7,13 +7,26 @@ extern crate toml;
 use std::{env, process};
 use std::fs::File;
 use std::io::{self, Read, Write};
+use std::path::Path;
 
 fn main() {
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
 
     let mut configs = vec![];
+    let mut cookbook = None;
     for arg in env::args().skip(1) {
+        if arg.starts_with("--cookbook=") {
+            let path = arg.splitn(2, "--cookbook=").nth(1).unwrap().to_string();
+            if !Path::new(&path).is_dir() {
+                writeln!(stderr, "installer: {}: cookbook not found", arg).unwrap();
+                process::exit(1);
+
+            }
+            cookbook = Some(path);
+            continue;
+        }
+
         match File::open(&arg) {
             Ok(mut config_file) => {
                 let mut config_data = String::new();
@@ -59,7 +72,7 @@ fn main() {
     }
 
     for config in configs {
-        if let Err(err) = redox_installer::install(config) {
+        if let Err(err) = redox_installer::install(config, cookbook.as_ref().map(String::as_ref)) {
             writeln!(stderr, "installer: failed to install: {}", err).unwrap();
             process::exit(1);
         }
