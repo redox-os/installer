@@ -16,7 +16,6 @@ pkgutils = { git = "https://github.com/redox-os/pkgutils.git" }
 rand = "0.3"
 serde = "0.8"
 serde_derive = "0.8"
-tar = { git = "https://github.com/redox-os/tar-rs.git" }
 termion = "1.1"
 toml = { version = "0.2", default-features = false, features = ["serde"] }
 userutils = { git = "https://github.com/redox-os/userutils.git" }

@@ -1,21 +1,21 @@
 extern crate liner;
 extern crate pkgutils;
 extern crate rand;
-extern crate tar;
 extern crate termion;
 extern crate userutils;
 
 use self::rand::Rng;
-use self::tar::{Archive, EntryType};
 use self::termion::input::TermRead;
+use self::pkgutils::Repo;
 
 use std::{env, fs};
-use std::io::{self, Read, Write};
-use std::os::unix::fs::OpenOptionsExt;
-use std::path::Path;
+use std::io::{self, Write};
 use std::str::FromStr;
 
 use config::Config;
+
+const REMOTE: &'static str = "https://static.redox-os.org/pkg";
+const TARGET: &'static str = "x86_64-unknown-redox";
 
 fn unwrap_or_prompt<T: FromStr>(option: Option<T>, context: &mut liner::Context, prompt: &str) -> Result<T, String> {
     match option {
@@ -61,46 +61,6 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String, String>
     } else {
         Ok(String::new())
     }
-}
-
-fn extract_inner<T: Read>(ar: &mut Archive<T>, root: &Path) -> io::Result<()> {
-    for entry_result in try!(ar.entries()) {
-        let mut entry = try!(entry_result);
-        match entry.header().entry_type() {
-            EntryType::Regular => {
-                let mut file = {
-                    let mut path = root.to_path_buf();
-                    path.push(try!(entry.path()));
-                    if let Some(parent) = path.parent() {
-                        println!("Extract file parent {}", parent.display());
-                        try!(fs::create_dir_all(parent));
-                    }
-                    println!("Extract file {}", path.display());
-                    try!(
-                        fs::OpenOptions::new()
-                            .read(true)
-                            .write(true)
-                            .truncate(true)
-                            .create(true)
-                            .mode(entry.header().mode().unwrap_or(644))
-                            .open(path)
-                    )
-                };
-                try!(io::copy(&mut entry, &mut file));
-            },
-            EntryType::Directory => {
-                let mut path = root.to_path_buf();
-                path.push(try!(entry.path()));
-                println!("Extract directory {}", path.display());
-                try!(fs::create_dir_all(path));
-            },
-            other => {
-                panic!("Unsupported entry type {:?}", other);
-            }
-        }
-    }
-
-    Ok(())
 }
 
 pub fn install(config: Config) -> Result<(), String> {
@@ -155,20 +115,13 @@ pub fn install(config: Config) -> Result<(), String> {
 
     dir!("");
 
-    for (packagename, _package) in config.packages {
-        let remote_path = format!("{}/{}/{}.tar", "https://static.redox-os.org/pkg", "x86_64-unknown-redox", packagename);
-        let local_path = format!("pkg/{}.tar", packagename);
-        if let Some(parent) = Path::new(&local_path).parent() {
-            println!("Create package repository {}", parent.display());
-            fs::create_dir_all(parent).map_err(|err| format!("failed to create package repository {}: {}", parent.display(), err))?;
-        }
-        println!("Download package {} to {}", remote_path, local_path);
-        pkgutils::download(&remote_path, &local_path).map_err(|err| format!("failed to download {} to {}: {}", remote_path, local_path, err))?;
+    let mut repo = Repo::new(TARGET);
+    repo.add_remote(REMOTE);
+    repo.set_dest(sysroot.to_str().unwrap());
 
-        let path = Path::new(&local_path);
-        println!("Extract package {}", path.display());
-        let file = fs::File::open(&path).map_err(|err| format!("failed to open {}: {}", path.display(), err))?;
-        extract_inner(&mut Archive::new(file), &sysroot).map_err(|err| format!("failed to extract {}: {}", path.display(), err))?;
+    for (packagename, _package) in config.packages {
+        println!("Installing package {}", packagename);
+        repo.install(&packagename).unwrap();
     }
 
     for file in config.files {
