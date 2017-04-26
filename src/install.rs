@@ -6,7 +6,7 @@ extern crate userutils;
 
 use self::rand::Rng;
 use self::termion::input::TermRead;
-use self::pkgutils::Repo;
+use self::pkgutils::{Repo, Package};
 
 use std::{env, fs};
 use std::io::{self, stderr, Write};
@@ -67,7 +67,6 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String, String>
 fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
     let mut repo = Repo::new(TARGET);
     repo.add_remote(REMOTE);
-    repo.set_dest(dest);
 
     if let Some(cookbook) = cookbook {
         let status = Command::new("./update-packages.sh")
@@ -87,12 +86,12 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
             let path = format!("{}/{}/repo/{}/{}.tar",
                                env::current_dir().unwrap().to_string_lossy(),
                                cookbook, TARGET, packagename);
-            repo.install_file(&path).unwrap();
+            Package::from_path(&path).unwrap().install(dest).unwrap();
         }
     } else {
         for (packagename, _package) in &config.packages {
             println!("Installing package {}", packagename);
-            repo.install(&packagename).unwrap();
+            repo.fetch(&packagename).unwrap().install(dest).unwrap();
         }
     }
 }
