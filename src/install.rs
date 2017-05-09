@@ -83,6 +83,7 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
         }
 
         for (packagename, _package) in &config.packages {
+            println!("Installing package {}", packagename);
             let path = format!("{}/{}/repo/{}/{}.tar",
                                env::current_dir().unwrap().to_string_lossy(),
                                cookbook, TARGET, packagename);
