@@ -190,7 +190,9 @@ pub fn install(config: Config, cookbook: Option<&str>) -> Result<(), String> {
 
         passwd.push_str(&format!("{};{};{};{};{};{};{}\n", username, password, uid, gid, name, home, shell));
     }
-    file!("etc/passwd", passwd.as_bytes());
+    if ! passwd.is_empty() {
+        file!("etc/passwd", passwd.as_bytes());
+    }
 
     Ok(())
 }
