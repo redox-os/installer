@@ -1,0 +1,3 @@
+[submodule "redoxfs"]
+	path = redoxfs
+	url = https://github.com/redox-os/redoxfs.git
