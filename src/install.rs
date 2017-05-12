@@ -69,7 +69,7 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
     repo.add_remote(REMOTE);
 
     if let Some(cookbook) = cookbook {
-        let status = Command::new("./update-packages.sh")
+        let status = Command::new("./repo.sh")
             .current_dir(cookbook)
             .args(config.packages.keys())
             .spawn()
@@ -78,7 +78,7 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
             .unwrap();
 
         if !status.success() {
-            write!(stderr(), "./update-package.sh failed.").unwrap();
+            write!(stderr(), "./repo.sh failed.").unwrap();
             process::exit(1);
         }
 
