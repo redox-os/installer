@@ -15,6 +15,7 @@ fn main() {
 
     let mut configs = vec![];
     let mut cookbook = None;
+    let mut list_packages = false;
     for arg in env::args().skip(1) {
         if arg.starts_with("--cookbook=") {
             let path = arg.splitn(2, "--cookbook=").nth(1).unwrap().to_string();
@@ -24,6 +25,11 @@ fn main() {
 
             }
             cookbook = Some(path);
+            continue;
+        }
+
+        if arg == "--list-packages" {
+            list_packages = true;
             continue;
         }
 
@@ -72,7 +78,11 @@ fn main() {
     }
 
     for config in configs {
-        if let Err(err) = redox_installer::install(config, cookbook.as_ref().map(String::as_ref)) {
+        if list_packages {
+            for (packagename, _package) in &config.packages {
+                println!("{}", packagename);
+            }
+        } else if let Err(err) = redox_installer::install(config, cookbook.as_ref().map(String::as_ref)) {
             writeln!(stderr, "installer: failed to install: {}", err).unwrap();
             process::exit(1);
         }
