@@ -12,6 +12,9 @@ use std::{env, fs};
 use std::io::{self, stderr, Write};
 use std::str::FromStr;
 use std::process::{self, Command};
+use std::os::unix::fs::symlink;
+use std::os::unix::ffi::OsStrExt;
+use std::ffi::OsStr;
 
 use config::Config;
 
@@ -134,16 +137,21 @@ pub fn install(config: Config, cookbook: Option<&str>) -> Result<(), String> {
     }
 
     macro_rules! file {
-        ($path:expr, $data:expr) => {{
+        ($path:expr, $data:expr, $symlink:expr) => {{
             let mut path = sysroot.clone();
             path.push($path);
             if let Some(parent) = path.parent() {
                 println!("Create file parent {}", parent.display());
                 fs::create_dir_all(parent).map_err(|err| format!("failed to create file parent {}: {}", parent.display(), err))?;
             }
-            println!("Create file {}", path.display());
-            let mut file = fs::File::create(&path).map_err(|err| format!("failed to create {}: {}", path.display(), err))?;
-            file.write_all($data).map_err(|err| format!("failed to write {}: {}", path.display(), err))?;
+            if $symlink {
+                println!("Create symlink {}", path.display());
+                symlink(&OsStr::from_bytes($data), &path).map_err(|err| format!("failed to symlink {}: {}", path.display(), err))?;
+            } else {
+                println!("Create file {}", path.display());
+                let mut file = fs::File::create(&path).map_err(|err| format!("failed to create {}: {}", path.display(), err))?;
+                file.write_all($data).map_err(|err| format!("failed to write {}: {}", path.display(), err))?;
+            }
         }};
     }
 
@@ -152,7 +160,7 @@ pub fn install(config: Config, cookbook: Option<&str>) -> Result<(), String> {
     install_packages(&config, sysroot.to_str().unwrap(), cookbook);
 
     for file in config.files {
-        file!(file.path.trim_matches('/'), file.data.as_bytes());
+        file!(file.path.trim_matches('/'), file.data.as_bytes(), file.symlink);
     }
 
     let mut passwd = String::new();
@@ -191,7 +199,7 @@ pub fn install(config: Config, cookbook: Option<&str>) -> Result<(), String> {
         passwd.push_str(&format!("{};{};{};{};{};{};{}\n", username, password, uid, gid, name, home, shell));
     }
     if ! passwd.is_empty() {
-        file!("etc/passwd", passwd.as_bytes());
+        file!("etc/passwd", passwd.as_bytes(), false);
     }
 
     Ok(())
