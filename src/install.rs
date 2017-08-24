@@ -183,8 +183,8 @@ pub fn install(config: Config, cookbook: Option<&str>) -> Result<(), String> {
         let gid = user.gid.unwrap_or(uid);
 
         let name = prompt!(user.name, username.clone(), "{}: name [{}]: ", username, username)?;
-        let home = prompt!(user.home, format!("/home/{}", username), "{}: home [/home/{}]: ", username, username)?;
-        let shell = prompt!(user.shell, "/bin/ion".to_string(), "{}: shell [/bin/ion]: ", username)?;
+        let home = prompt!(user.home, format!("file:/home/{}", username), "{}: home [file:/home/{}]: ", username, username)?;
+        let shell = prompt!(user.shell, "file:/bin/ion".to_string(), "{}: shell [file:/bin/ion]: ", username)?;
 
         println!("Adding user {}:", username);
         println!("\tPassword: {}", password);
