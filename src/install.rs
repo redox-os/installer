@@ -9,12 +9,13 @@ use self::termion::input::TermRead;
 use self::pkgutils::{Repo, Package};
 
 use std::{env, fs};
-use std::io::{self, stderr, Write};
-use std::str::FromStr;
-use std::process::{self, Command};
-use std::os::unix::fs::symlink;
-use std::os::unix::ffi::OsStrExt;
 use std::ffi::OsStr;
+use std::io::{self, stderr, Write};
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::symlink;
+use std::path::Path;
+use std::process::{self, Command};
+use std::str::FromStr;
 
 use config::Config;
 
@@ -100,8 +101,10 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
     }
 }
 
-pub fn install(config: Config, cookbook: Option<&str>) -> Result<(), String> {
-    println!("Install {:#?}", config);
+pub fn install<P: AsRef<Path>>(config: Config, output: P, cookbook: Option<&str>) -> Result<(), String> {
+    let output = output.as_ref();
+
+    println!("Install {:#?} to {}", config, output.display());
 
     let mut context = liner::Context::new();
 
@@ -120,12 +123,8 @@ pub fn install(config: Config, cookbook: Option<&str>) -> Result<(), String> {
         })
     }
 
-    let sysroot = {
-        let mut wd = env::current_dir().map_err(|err| format!("failed to get current dir: {}", err))?;
-        let path = prompt!(config.general.sysroot.clone(), "sysroot".to_string(), "sysroot [sysroot]: ")?;
-        wd.push(path);
-        wd
-    };
+    // TODO: Mount disk if output is a file
+    let sysroot = output.to_owned();
 
     macro_rules! dir {
         ($path:expr) => {{

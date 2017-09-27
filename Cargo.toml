@@ -1,6 +1,6 @@
 [package]
 name = "redox_installer"
-version = "0.1.0"
+version = "0.2.0"
 
 [[bin]]
 name = "redox_installer"
@@ -11,6 +11,7 @@ name = "redox_installer"
 path = "src/lib.rs"
 
 [dependencies]
+clap = "2.26"
 liner = "0.1"
 pkgutils = { git = "https://github.com/redox-os/pkgutils.git" }
 rand = "0.3"
