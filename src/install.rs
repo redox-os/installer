@@ -68,13 +68,13 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String, String>
     }
 }
 
-fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
+fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option<S>) {
     let mut repo = Repo::new(TARGET);
     repo.add_remote(REMOTE);
 
     if let Some(cookbook) = cookbook {
         let status = Command::new("./repo.sh")
-            .current_dir(cookbook)
+            .current_dir(cookbook.as_ref())
             .args(config.packages.keys())
             .spawn()
             .unwrap()
@@ -90,7 +90,7 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
             println!("Installing package {}", packagename);
             let path = format!("{}/{}/repo/{}/{}.tar.gz",
                                env::current_dir().unwrap().to_string_lossy(),
-                               cookbook, TARGET, packagename);
+                               cookbook.as_ref(), TARGET, packagename);
             Package::from_path(&path).unwrap().install(dest).unwrap();
         }
     } else {
@@ -101,7 +101,7 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
     }
 }
 
-pub fn install<P: AsRef<Path>>(config: Config, output: P, cookbook: Option<&str>) -> Result<(), String> {
+pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output: P, cookbook: Option<S>) -> Result<(), String> {
     let output = output.as_ref();
 
     println!("Install {:#?} to {}", config, output.display());
