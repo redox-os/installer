@@ -20,4 +20,4 @@ serde = "0.8"
 serde_derive = "0.8"
 termion = "1.5.1"
 toml = { version = "0.2", default-features = false, features = ["serde"] }
-userutils = { git = "https://github.com/redox-os/userutils.git" }
+redox_users = { git = "https://github.com/redox-os/users.git" }
