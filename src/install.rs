@@ -2,7 +2,7 @@ extern crate liner;
 extern crate pkgutils;
 extern crate rand;
 extern crate termion;
-extern crate userutils;
+extern crate redox_users;
 
 use self::rand::Rng;
 use self::termion::input::TermRead;
@@ -55,7 +55,7 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String, String>
 
                 if confirm_password == password {
                     let salt = format!("{:X}", rand::OsRng::new().unwrap().next_u64());
-                    Ok(userutils::Passwd::encode(&password, &salt))
+                    Ok(redox_users::User::encode_passwd(&password, &salt))
                 } else {
                     Err("passwords do not match".to_string())
                 }
