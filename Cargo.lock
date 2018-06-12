@@ -6,7 +6,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "arg_parser"
 version = "0.1.0"
-source = "git+https://github.com/redox-os/arg-parser.git#d16e2d02e87996bbe2bce4a201c66c0df4a1e866"
+source = "git+https://gitlab.redox-os.org/redox-os/arg-parser.git#d16e2d02e87996bbe2bce4a201c66c0df4a1e866"
 
 [[package]]
 name = "argon2rs"
@@ -110,7 +110,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "extra"
 version = "0.1.0"
-source = "git+https://github.com/redox-os/libextra.git#402932084acd5fef4812945887ceaaa2ddd5f264"
+source = "git+https://gitlab.redox-os.org/redox-os/libextra.git#402932084acd5fef4812945887ceaaa2ddd5f264"
 
 [[package]]
 name = "fixedbitset"
@@ -333,7 +333,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "pkgutils"
 version = "0.1.1"
-source = "git+https://github.com/redox-os/pkgutils.git#767c4d24e3358e778819e0059c15cd0ba2358cbc"
+source = "git+https://gitlab.redox-os.org/redox-os/pkgutils.git#767c4d24e3358e778819e0059c15cd0ba2358cbc"
 dependencies = [
  "bidir-map 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "clap 2.27.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -347,7 +347,7 @@ dependencies = [
  "petgraph 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.21 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.21 (registry+https://github.com/rust-lang/crates.io-index)",
- "tar 0.4.13 (git+https://github.com/redox-os/tar-rs)",
+ "tar 0.4.13 (git+https://gitlab.redox-os.org/redox-os/tar-rs)",
  "toml 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "version-compare 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -390,11 +390,11 @@ dependencies = [
 name = "redox_installer"
 version = "0.2.0"
 dependencies = [
- "arg_parser 0.1.0 (git+https://github.com/redox-os/arg-parser.git)",
+ "arg_parser 0.1.0 (git+https://gitlab.redox-os.org/redox-os/arg-parser.git)",
  "liner 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
- "pkgutils 0.1.1 (git+https://github.com/redox-os/pkgutils.git)",
+ "pkgutils 0.1.1 (git+https://gitlab.redox-os.org/redox-os/pkgutils.git)",
  "rand 0.3.18 (registry+https://github.com/rust-lang/crates.io-index)",
- "redox_users 0.1.0 (git+https://github.com/redox-os/users.git)",
+ "redox_users 0.1.0 (git+https://gitlab.redox-os.org/redox-os/users.git)",
  "redoxfs 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 0.8.23 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 0.8.23 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -418,10 +418,10 @@ dependencies = [
 [[package]]
 name = "redox_users"
 version = "0.1.0"
-source = "git+https://github.com/redox-os/users.git#50f4022e6c713a131bbbfde360cb0f369e96c672"
+source = "git+https://gitlab.redox-os.org/redox-os/users.git#50f4022e6c713a131bbbfde360cb0f369e96c672"
 dependencies = [
  "argon2rs 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
- "extra 0.1.0 (git+https://github.com/redox-os/libextra.git)",
+ "extra 0.1.0 (git+https://gitlab.redox-os.org/redox-os/libextra.git)",
  "redox_syscall 0.1.31 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -577,7 +577,7 @@ dependencies = [
 [[package]]
 name = "tar"
 version = "0.4.13"
-source = "git+https://github.com/redox-os/tar-rs#b71c22029efc76611016fc4962f29afbe6d44bed"
+source = "git+https://gitlab.redox-os.org/redox-os/tar-rs#b71c22029efc76611016fc4962f29afbe6d44bed"
 dependencies = [
  "libc 0.2.33 (registry+https://github.com/rust-lang/crates.io-index)",
  "xattr 0.1.11 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -751,7 +751,7 @@ dependencies = [
 
 [metadata]
 "checksum adler32 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "6cbd0b9af8587c72beadc9f72d35b9fbb070982c9e6203e46e93f10df25f8f45"
-"checksum arg_parser 0.1.0 (git+https://github.com/redox-os/arg-parser.git)" = "<none>"
+"checksum arg_parser 0.1.0 (git+https://gitlab.redox-os.org/redox-os/arg-parser.git)" = "<none>"
 "checksum argon2rs 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)" = "3f67b0b6a86dae6e67ff4ca2b6201396074996379fba2b92ff649126f37cb392"
 "checksum base64 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)" = "96434f987501f0ed4eb336a411e0631ecd1afa11574fe148587adc4ff96143c9"
 "checksum bidir-map 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)" = "6c3d05037e57974413eef55a8505df19de3cb4dc7a8f8389e1588ec492ae9c73"
@@ -767,7 +767,7 @@ dependencies = [
 "checksum crc 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fba69ea0e15e720f7e1cfe1cf3bc55007fbd41e32b8ae11cfa343e7e5961e79a"
 "checksum crc-core 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "003d1170779d405378223470f5864b41b79a91969be1260e4de7b4ec069af69c"
 "checksum either 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "740178ddf48b1a9e878e6d6509a1442a2d42fd2928aae8e7a6f8a36fb01981b3"
-"checksum extra 0.1.0 (git+https://github.com/redox-os/libextra.git)" = "<none>"
+"checksum extra 0.1.0 (git+https://gitlab.redox-os.org/redox-os/libextra.git)" = "<none>"
 "checksum fixedbitset 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)" = "85cb8fec437468d86dc7c83ca7cfc933341d561873275f22dd5eedefa63a6478"
 "checksum fuchsia-zircon 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "f6c0581a4e363262e52b87f59ee2afe3415361c6ec35e665924eb08afe8ff159"
 "checksum fuchsia-zircon-sys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "43f3795b4bae048dc6123a6b972cadde2e676f9ded08aef6bb77f5f157684a82"
@@ -796,14 +796,14 @@ dependencies = [
 "checksum percent-encoding 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "31010dd2e1ac33d5b46a5b413495239882813e0369f8ed8a5e266f173602f831"
 "checksum petgraph 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)" = "28d0872a49ce3ee71b345f4fa675afe394d9e0d077f8eeeb3d04081724065d67"
 "checksum pkg-config 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)" = "3a8b4c6b8165cd1a1cd4b9b120978131389f64bdaf456435caa41e630edba903"
-"checksum pkgutils 0.1.1 (git+https://github.com/redox-os/pkgutils.git)" = "<none>"
+"checksum pkgutils 0.1.1 (git+https://gitlab.redox-os.org/redox-os/pkgutils.git)" = "<none>"
 "checksum quote 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)" = "7a6e920b65c65f10b2ae65c831a81a073a89edd28c7cce89475bff467ab4167a"
 "checksum rand 0.3.18 (registry+https://github.com/rust-lang/crates.io-index)" = "6475140dfd8655aeb72e1fd4b7a1cc1c202be65d71669476e392fe62532b9edd"
 "checksum rayon 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)" = "a77c51c07654ddd93f6cb543c7a849863b03abc7e82591afda6dc8ad4ac3ac4a"
 "checksum rayon-core 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "e64b609139d83da75902f88fd6c01820046840a18471e4dfcd5ac7c0f46bea53"
 "checksum redox_syscall 0.1.31 (registry+https://github.com/rust-lang/crates.io-index)" = "8dde11f18c108289bef24469638a04dce49da56084f2d50618b226e47eb04509"
 "checksum redox_termios 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "7e891cfe48e9100a70a3b6eb652fef28920c117d366339687bd5576160db0f76"
-"checksum redox_users 0.1.0 (git+https://github.com/redox-os/users.git)" = "<none>"
+"checksum redox_users 0.1.0 (git+https://gitlab.redox-os.org/redox-os/users.git)" = "<none>"
 "checksum redoxfs 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "1f800e00e74d5e26b5066798195a0bffab834ecf0ae7f460d82d884c9569fa36"
 "checksum ring 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)" = "1f2a6dc7fc06a05e6de183c5b97058582e9da2de0c136eafe49609769c507724"
 "checksum rustls 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)" = "17727f4b991294da2c84d75a43c003151ff58072212768800f66c56ee46dca43"
@@ -822,7 +822,7 @@ dependencies = [
 "checksum syn 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)" = "58fd09df59565db3399efbba34ba8a2fec1307511ebd245d0061ff9d42691673"
 "checksum syn 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)" = "d3b891b9015c88c576343b9b3e41c2c11a51c219ef067b264bd9c8aa9b441dad"
 "checksum synom 0.11.3 (registry+https://github.com/rust-lang/crates.io-index)" = "a393066ed9010ebaed60b9eafa373d4b1baac186dd7e008555b0f702b51945b6"
-"checksum tar 0.4.13 (git+https://github.com/redox-os/tar-rs)" = "<none>"
+"checksum tar 0.4.13 (git+https://gitlab.redox-os.org/redox-os/tar-rs)" = "<none>"
 "checksum termion 1.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "689a3bdfaab439fd92bc87df5c4c78417d3cbe537487274e9b0b2dce76e92096"
 "checksum textwrap 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)" = "c0b59b6b4b44d867f1370ef1bd91bfb262bf07bf0ae65c202ea2fbc16153b693"
 "checksum thread-scoped 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "bcbb6aa301e5d3b0b5ef639c9a9c7e2f1c944f177b460c04dc24c69b1fa2bd99"
