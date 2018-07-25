@@ -163,6 +163,7 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output: P, cookboo
     }
 
     let mut passwd = String::new();
+    let mut shadow = String::new();
     let mut next_uid = 1000;
     for (username, user) in config.users {
         let password = if let Some(password) = user.password {
@@ -195,11 +196,17 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output: P, cookboo
 
         dir!(home.trim_matches('/'));
 
-        passwd.push_str(&format!("{};{};{};{};{};file:{};file:{}\n", username, password, uid, gid, name, home, shell));
+        passwd.push_str(&format!("{};{};{};{};file:{};file:{}\n", username, uid, gid, name, home, shell));
+        shadow.push_str(&format!("{};{}\n", username, password));
     }
-    if ! passwd.is_empty() {
+    
+    if !passwd.is_empty() {
         file!("etc/passwd", passwd.as_bytes(), false);
     }
-
+    
+    if !shadow.is_empty() {
+        file!("etc/shadow", shadow.as_bytes(), false);
+    }
+    
     Ok(())
 }
