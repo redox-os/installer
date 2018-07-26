@@ -33,6 +33,7 @@ type Result<T> = std::result::Result<T, Error>;
 
 const REMOTE: &'static str = "https://static.redox-os.org/pkg";
 const TARGET: &'static str = "x86_64-unknown-redox";
+const SYSROOT: &'static str = "SYSROOT";
 
 /// Converts a password to a serialized argon2rs hash, understandable
 /// by redox_users. If the password is blank, the hash is blank.
@@ -120,12 +121,42 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
     }
 }
 
-pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output: P, cookbook: Option<S>) -> Result<()> {
-    let output = output.as_ref();
-    println!("Install {:#?} to {}", config, output.display());
-
+pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, cookbook: Option<S>) -> Result<()> {
+    
+    /// Creates a directory relative to the output directory
+    fn create_dir_relative<P: AsRef<Path>>(path: P) -> Result<()> {
+        let root = env::var(SYSROOT)?;
+        let target_dir = Path::new(&root)
+            .join(path.as_ref());
+        println!("Create directory {}", target_dir.display());
+        fs::create_dir_all(&target_dir)?;
+        Ok(())
+    }
+    
+    /// Creates a file relative to the output directory
+    fn create_file_relative<P: AsRef<Path>>(path: P, data: &[u8], is_symlink: bool) -> Result<()> {
+        let root = env::var(SYSROOT)?;
+        let target_file = Path::new(&root)
+            .join(path.as_ref());
+        
+        if let Some(parent) = target_file.parent() {
+            println!("Create file parent {}", parent.display());
+            fs::create_dir_all(parent)?;
+        }
+        
+        if is_symlink {
+            println!("Create symlink {}", target_file.display());
+            symlink(&OsStr::from_bytes(data), &target_file)?;
+        } else {
+            println!("Create file {}", target_file.display());
+            let mut file = fs::File::create(&target_file)?;
+            file.write_all(data)?;
+        }
+        Ok(())
+    }
+    
     let mut context = liner::Context::new();
-
+    
     macro_rules! prompt {
         ($dst:expr, $def:expr, $($arg:tt)*) => (if config.general.prompt {
             match unwrap_or_prompt($dst, &mut context, &format!($($arg)*)) {
@@ -141,48 +172,27 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output: P, cookboo
         })
     }
 
+    // Using an env var here to communicate the root dir to the functions
+    //   instead of passing it as a param
+    env::set_var(SYSROOT, output_dir.as_ref().as_os_str());
+
+    let output_dir = output_dir.as_ref();
+    println!("Install {:#?} to {}", config, output_dir.display());
+
     // TODO: Mount disk if output is a file
-    let sysroot = output.to_owned();
+    let output_dir = output_dir.to_owned();
 
-    macro_rules! dir {
-        ($path:expr) => {{
-            let mut path = sysroot.clone();
-            path.push($path);
-            println!("Create directory {}", path.display());
-            fs::create_dir_all(&path)?;
-        }};
-    }
+    create_dir_relative("")?;
 
-    macro_rules! file {
-        ($path:expr, $data:expr, $symlink:expr) => {{
-            let mut path = sysroot.clone();
-            path.push($path);
-            if let Some(parent) = path.parent() {
-                println!("Create file parent {}", parent.display());
-                fs::create_dir_all(parent)?;
-            }
-            if $symlink {
-                println!("Create symlink {}", path.display());
-                symlink(&OsStr::from_bytes($data), &path)?;
-            } else {
-                println!("Create file {}", path.display());
-                let mut file = fs::File::create(&path)?;
-                file.write_all($data)?;
-            }
-        }};
-    }
-
-    dir!("");
-
-    install_packages(&config, sysroot.to_str().unwrap(), cookbook);
+    install_packages(&config, output_dir.to_str().unwrap(), cookbook);
 
     for file in config.files {
-        file!(file.path.trim_matches('/'), file.data.as_bytes(), file.symlink);
+        create_file_relative(file.path.trim_matches('/'), file.data.as_bytes(), file.symlink)?;
     }
 
     let mut passwd = String::new();
     let mut next_uid = 1000;
-    
+
     for (username, user) in config.users {
         // plaintext
         let password = if let Some(password) = user.password {
@@ -203,7 +213,7 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output: P, cookboo
 
         let gid = user.gid.unwrap_or(uid);
 
-        let name = prompt!(user.name, username.clone(), "{}: name [{}]: ", username, username)?;
+        let name = prompt!(user.name, username.clone(), "{}: name (GECOS) [{}]: ", username, username)?;
         let home = prompt!(user.home, format!("/home/{}", username), "{}: home [/home/{}]: ", username, username)?;
         let shell = prompt!(user.shell, "/bin/ion".to_string(), "{}: shell [/bin/ion]: ", username)?;
 
@@ -215,15 +225,15 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output: P, cookboo
         println!("\tHome: {}", home);
         println!("\tShell: {}", shell);
 
-        dir!(home.trim_matches('/'));
-        
+        create_dir_relative(home.trim_matches('/'))?;
+
         let password = hash_password(&password)?;
-        
+
         passwd.push_str(&format!("{};{};{};{};{};file:{};file:{}\n", username, password, uid, gid, name, home, shell));
     }
-    
-    if ! passwd.is_empty() {
-        file!("etc/passwd", passwd.as_bytes(), false);
+
+    if !passwd.is_empty() {
+        create_file_relative("etc/passwd", passwd.as_bytes(), false)?;
     }
 
     Ok(())
