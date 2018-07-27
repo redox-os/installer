@@ -14,6 +14,7 @@ path = "src/lib.rs"
 arg_parser = { git = "https://github.com/redox-os/arg-parser.git" }
 argon2rs = { version = "0.2", default-features = false }
 liner = "0.1"
+libc = "0.2"
 failure = "0.1"
 pkgutils = { git = "https://github.com/redox-os/pkgutils.git" }
 rand = "0.3"

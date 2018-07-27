@@ -3,6 +3,7 @@
 #[macro_use]
 extern crate serde_derive;
 extern crate argon2rs;
+extern crate libc;
 extern crate liner;
 extern crate failure;
 extern crate pkgutils;
@@ -12,6 +13,7 @@ extern crate termion;
 mod config;
 
 pub use config::Config;
+use config::file::FileConfig;
 
 use argon2rs::verifier::Encoded;
 use argon2rs::{Argon2, Variant};
@@ -21,15 +23,12 @@ use termion::input::TermRead;
 use pkgutils::{Repo, Package};
 
 use std::{env, fs};
-use std::ffi::OsStr;
 use std::io::{self, stderr, Write};
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::{self, Command};
 use std::str::FromStr;
 
-type Result<T> = std::result::Result<T, Error>;
+pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 const REMOTE: &'static str = "https://static.redox-os.org/pkg";
 const TARGET: &'static str = "x86_64-unknown-redox";
@@ -133,28 +132,6 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, coo
         Ok(())
     }
     
-    /// Creates a file relative to the output directory
-    fn create_file_relative<P: AsRef<Path>>(path: P, data: &[u8], is_symlink: bool) -> Result<()> {
-        let root = env::var(SYSROOT)?;
-        let target_file = Path::new(&root)
-            .join(path.as_ref());
-        
-        if let Some(parent) = target_file.parent() {
-            println!("Create file parent {}", parent.display());
-            fs::create_dir_all(parent)?;
-        }
-        
-        if is_symlink {
-            println!("Create symlink {}", target_file.display());
-            symlink(&OsStr::from_bytes(data), &target_file)?;
-        } else {
-            println!("Create file {}", target_file.display());
-            let mut file = fs::File::create(&target_file)?;
-            file.write_all(data)?;
-        }
-        Ok(())
-    }
-    
     let mut context = liner::Context::new();
     
     macro_rules! prompt {
@@ -172,22 +149,21 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, coo
         })
     }
 
+    let output_dir = output_dir.as_ref();
+
     // Using an env var here to communicate the root dir to the functions
     //   instead of passing it as a param
-    env::set_var(SYSROOT, output_dir.as_ref().as_os_str());
+    env::set_var(SYSROOT, output_dir.as_os_str());
 
-    let output_dir = output_dir.as_ref();
     println!("Install {:#?} to {}", config, output_dir.display());
 
     // TODO: Mount disk if output is a file
     let output_dir = output_dir.to_owned();
 
-    create_dir_relative("")?;
-
     install_packages(&config, output_dir.to_str().unwrap(), cookbook);
 
     for file in config.files {
-        create_file_relative(file.path.trim_matches('/'), file.data.as_bytes(), file.symlink)?;
+        file.create(&output_dir)?;
     }
 
     let mut passwd = String::new();
@@ -233,7 +209,14 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, coo
     }
 
     if !passwd.is_empty() {
-        create_file_relative("etc/passwd", passwd.as_bytes(), false)?;
+        FileConfig {
+            path: "/etc/passwd".to_string(),
+            data: passwd,
+            symlink: false,
+            mode: Some(0o755),
+            uid: Some(0),
+            gid: Some(0)
+        }.create(output_dir)?;
     }
 
     Ok(())
