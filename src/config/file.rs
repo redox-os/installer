@@ -17,12 +17,14 @@ pub struct FileConfig {
     pub data: String,
     #[serde(default)]
     pub symlink: bool,
+    #[serde(default)]
+    pub directory: bool,
     pub mode: Option<u32>,
     pub uid: Option<u32>,
     pub gid: Option<u32>
 }
 
-// TODO: Rewrite
+// TODO: Rewrite impls
 impl FileConfig {
     
     pub(crate) fn create<P: AsRef<Path>>(self, prefix: P) -> Result<()> {
@@ -30,9 +32,12 @@ impl FileConfig {
         let target_file = prefix.as_ref()
             .join(path);
         
-        println!("target file: {:?}", target_file);
-        
-        if let Some(parent) = target_file.parent() {
+        if self.directory {
+            println!("Create directory {}", target_file.display());
+            fs::create_dir_all(&target_file)?;
+            self.apply_perms(&target_file)?;
+            return Ok(());
+        } else if let Some(parent) = target_file.parent() {
             println!("Create file parent {}", parent.display());
             fs::create_dir_all(parent)?;
         }
@@ -52,7 +57,11 @@ impl FileConfig {
     
     fn apply_perms<P: AsRef<Path>>(&self, target: P) -> Result<()> {
         let path = target.as_ref();
-        let mode = self.mode.unwrap_or(0o0755);
+        let mode = self.mode.unwrap_or_else(|| if self.directory {
+                0o0755
+            } else {
+                0o0644
+            });
         let uid = self.uid.unwrap_or(0);
         let gid = self.gid.unwrap_or(0);
         

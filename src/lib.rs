@@ -22,7 +22,7 @@ use rand::{OsRng, Rng};
 use termion::input::TermRead;
 use pkgutils::{Repo, Package};
 
-use std::{env, fs};
+use std::env;
 use std::io::{self, stderr, Write};
 use std::path::Path;
 use std::process::{self, Command};
@@ -32,7 +32,6 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 const REMOTE: &'static str = "https://static.redox-os.org/pkg";
 const TARGET: &'static str = "x86_64-unknown-redox";
-const SYSROOT: &'static str = "SYSROOT";
 
 /// Converts a password to a serialized argon2rs hash, understandable
 /// by redox_users. If the password is blank, the hash is blank.
@@ -121,17 +120,6 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
 }
 
 pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, cookbook: Option<S>) -> Result<()> {
-    
-    /// Creates a directory relative to the output directory
-    fn create_dir_relative<P: AsRef<Path>>(path: P) -> Result<()> {
-        let root = env::var(SYSROOT)?;
-        let target_dir = Path::new(&root)
-            .join(path.as_ref());
-        println!("Create directory {}", target_dir.display());
-        fs::create_dir_all(&target_dir)?;
-        Ok(())
-    }
-    
     let mut context = liner::Context::new();
     
     macro_rules! prompt {
@@ -150,10 +138,6 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, coo
     }
 
     let output_dir = output_dir.as_ref();
-
-    // Using an env var here to communicate the root dir to the functions
-    //   instead of passing it as a param
-    env::set_var(SYSROOT, output_dir.as_os_str());
 
     println!("Install {:#?} to {}", config, output_dir.display());
 
@@ -201,7 +185,15 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, coo
         println!("\tHome: {}", home);
         println!("\tShell: {}", shell);
 
-        create_dir_relative(home.trim_matches('/'))?;
+        FileConfig {
+            path: home.clone(),
+            data: String::new(),
+            symlink: false,
+            directory: true,
+            mode: Some(0o0700),
+            uid: Some(uid),
+            gid: Some(gid)
+        }.create(&output_dir)?;
 
         let password = hash_password(&password)?;
 
@@ -213,10 +205,12 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, coo
             path: "/etc/passwd".to_string(),
             data: passwd,
             symlink: false,
-            mode: Some(0o755),
-            uid: Some(0),
-            gid: Some(0)
-        }.create(output_dir)?;
+            directory: false,
+            // Take defaults
+            mode: None,
+            uid: None,
+            gid: None
+        }.create(&output_dir)?;
     }
 
     Ok(())

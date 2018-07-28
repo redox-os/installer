@@ -171,3 +171,10 @@ Welcome to Redox OS!
 path = "/usr"
 data = "/"
 symlink = true
+
+[[files]]
+path = "/tmp"
+data = ""
+directory = true
+# 0o1777
+mode = 1023
