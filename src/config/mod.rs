@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 mod general;
-mod file;
+pub(crate) mod file;
 mod package;
 mod user;
 
