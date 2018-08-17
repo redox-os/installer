@@ -151,6 +151,7 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, coo
     }
 
     let mut passwd = String::new();
+    let mut shadow = String::new();
     let mut next_uid = 1000;
 
     for (username, user) in config.users {
@@ -197,7 +198,8 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, coo
 
         let password = hash_password(&password)?;
 
-        passwd.push_str(&format!("{};{};{};{};{};file:{};file:{}\n", username, password, uid, gid, name, home, shell));
+        passwd.push_str(&format!("{};{};{};{};file:{};file:{}\n", username, uid, gid, name, home, shell));
+        shadow.push_str(&format!("{};{}\n", username, password));
     }
 
     if !passwd.is_empty() {
@@ -210,6 +212,18 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, coo
             mode: None,
             uid: None,
             gid: None
+        }.create(&output_dir)?;
+    }
+    
+    if !shadow.is_empty() {
+        FileConfig {
+            path: "/etc/shadow".to_string(),
+            data: shadow,
+            symlink: false,
+            directory: false,
+            mode: Some(0o0600),
+            uid: Some(0),
+            gid: Some(0)
         }.create(&output_dir)?;
     }
 
