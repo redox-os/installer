@@ -62,8 +62,8 @@ impl FileConfig {
             } else {
                 0o0644
             });
-        let uid = self.uid.unwrap_or(0);
-        let gid = self.gid.unwrap_or(0);
+        let uid = self.uid.unwrap_or(-1);
+        let gid = self.gid.unwrap_or(-1);
         
         // chmod
         fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
