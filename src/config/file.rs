@@ -1,6 +1,6 @@
 
 use Result;
-use libc::chown;
+use libc::{chown, gid_t, uid_t};
 
 use std::io::{Error, Write};
 use std::ffi::{CString, OsStr};
@@ -71,7 +71,7 @@ impl FileConfig {
         // chown
         let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
         let ret = unsafe {
-            chown(c_path.as_ptr(), uid, gid)
+            chown(c_path.as_ptr(), uid as uid_t, gid as gid_t)
         };
         // credit to uutils
         if ret == 0 {
