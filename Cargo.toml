@@ -14,7 +14,7 @@ path = "src/lib.rs"
 arg_parser = { git = "https://gitlab.redox-os.org/redox-os/arg-parser.git" }
 argon2rs = { version = "0.2", default-features = false }
 liner = "0.1"
-libc = { git = "https://gitlab.redox-os.org/redox-os/liblibc.git", branch = "relibc" }
+libc = { git = "https://gitlab.redox-os.org/redox-os/liblibc.git", branch = "redox" }
 failure = "0.1"
 pkgutils = { git = "https://gitlab.redox-os.org/redox-os/pkgutils.git" }
 rand = "0.3"
