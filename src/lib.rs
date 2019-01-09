@@ -31,7 +31,7 @@ use std::str::FromStr;
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 const REMOTE: &'static str = "https://static.redox-os.org/pkg";
-const TARGET: &'static str = "x86_64-unknown-redox";
+const TARGET: &'static str = "aarch64-unknown-redox";
 
 /// Converts a password to a serialized argon2rs hash, understandable
 /// by redox_users. If the password is blank, the hash is blank.
@@ -121,7 +121,7 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
 
 pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, cookbook: Option<S>) -> Result<()> {
     let mut context = liner::Context::new();
-    
+
     macro_rules! prompt {
         ($dst:expr, $def:expr, $($arg:tt)*) => (if config.general.prompt {
             match unwrap_or_prompt($dst, &mut context, &format!($($arg)*)) {
@@ -214,7 +214,7 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, coo
             gid: None
         }.create(&output_dir)?;
     }
-    
+
     if !shadow.is_empty() {
         FileConfig {
             path: "/etc/shadow".to_string(),
