@@ -31,7 +31,6 @@ use std::str::FromStr;
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 const REMOTE: &'static str = "https://static.redox-os.org/pkg";
-const TARGET: &'static str = "x86_64-unknown-redox";
 
 /// Converts a password to a serialized argon2rs hash, understandable
 /// by redox_users. If the password is blank, the hash is blank.
@@ -87,7 +86,9 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
 }
 
 fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option<S>) {
-    let mut repo = Repo::new(TARGET);
+    let target = &env::var("TARGET").unwrap_or(env!("TARGET").to_string());
+
+    let mut repo = Repo::new(target);
     repo.add_remote(REMOTE);
 
     if let Some(cookbook) = cookbook {
@@ -108,7 +109,7 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
             println!("Installing package {}", packagename);
             let path = format!("{}/{}/repo/{}/{}.tar.gz",
                                env::current_dir().unwrap().to_string_lossy(),
-                               cookbook.as_ref(), TARGET, packagename);
+                               cookbook.as_ref(), target, packagename);
             Package::from_path(&path).unwrap().install(dest).unwrap();
         }
     } else {
