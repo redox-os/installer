@@ -26,12 +26,12 @@ pub struct FileConfig {
 
 // TODO: Rewrite impls
 impl FileConfig {
-    
+
     pub(crate) fn create<P: AsRef<Path>>(self, prefix: P) -> Result<()> {
-        let path = self.path.trim_left_matches('/');
+        let path = self.path.trim_start_matches('/');
         let target_file = prefix.as_ref()
             .join(path);
-        
+
         if self.directory {
             println!("Create directory {}", target_file.display());
             fs::create_dir_all(&target_file)?;
@@ -41,7 +41,7 @@ impl FileConfig {
             println!("Create file parent {}", parent.display());
             fs::create_dir_all(parent)?;
         }
-        
+
         if self.symlink {
             println!("Create symlink {}", target_file.display());
             symlink(&OsStr::new(&self.data), &target_file)?;
@@ -50,11 +50,11 @@ impl FileConfig {
             println!("Create file {}", target_file.display());
             let mut file = File::create(&target_file)?;
             file.write_all(self.data.as_bytes())?;
-            
+
             self.apply_perms(target_file)
         }
     }
-    
+
     fn apply_perms<P: AsRef<Path>>(&self, target: P) -> Result<()> {
         let path = target.as_ref();
         let mode = self.mode.unwrap_or_else(|| if self.directory {
@@ -64,10 +64,10 @@ impl FileConfig {
             });
         let uid = self.uid.unwrap_or(!0);
         let gid = self.gid.unwrap_or(!0);
-        
+
         // chmod
         fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
-        
+
         // chown
         let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
         let ret = unsafe {
