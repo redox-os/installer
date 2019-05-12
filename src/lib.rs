@@ -18,7 +18,7 @@ use config::file::FileConfig;
 use argon2rs::verifier::Encoded;
 use argon2rs::{Argon2, Variant};
 use failure::{Error, err_msg};
-use rand::{OsRng, Rng};
+use rand::{RngCore, rngs::OsRng};
 use termion::input::TermRead;
 use pkgutils::{Repo, Package};
 

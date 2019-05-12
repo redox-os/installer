@@ -28,24 +28,12 @@ fn main() {
                 let mut config_data = String::new();
                 match config_file.read_to_string(&mut config_data) {
                     Ok(_) => {
-                        let mut parser = toml::Parser::new(&config_data);
-                        match parser.parse() {
-                            Some(parsed) => {
-                                let mut decoder = toml::Decoder::new(toml::Value::Table(parsed));
-                                match serde::Deserialize::deserialize(&mut decoder) {
-                                    Ok(config) => {
-                                        config
-                                    },
-                                    Err(err) => {
-                                        writeln!(stderr, "installer: {}: failed to decode: {}", path, err).unwrap();
-                                        process::exit(1);
-                                    }
-                                }
+                        match toml::from_str(&config_data) {
+                            Ok(config) => {
+                                config
                             },
-                            None => {
-                                for error in parser.errors {
-                                    writeln!(stderr, "installer: {}: failed to parse: {}", path, error).unwrap();
-                                }
+                            Err(err) => {
+                                writeln!(stderr, "installer: {}: failed to decode: {}", path, err).unwrap();
                                 process::exit(1);
                             }
                         }
