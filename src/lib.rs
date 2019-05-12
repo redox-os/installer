@@ -74,8 +74,6 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
 
     print!("\n{}", confirm_prompt);
     let confirm_password = stdin.read_passwd(&mut stdout)?;
-    // TODO: Remove this debug msg
-    println!("\nPass: {:?}; ConfPass: {:?};", password, confirm_password);
 
     // Note: Actually comparing two Option<String> values
     if confirm_password == password {
@@ -86,7 +84,12 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
 }
 
 fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option<S>) {
-    let target = &env::var("TARGET").unwrap_or(env!("TARGET").to_string());
+    let target = &env::var("TARGET").unwrap_or(
+        option_env!("TARGET").map_or(
+            "x86_64-unknown-redox".to_string(),
+            |x| x.to_string()
+        )
+    );
 
     let mut repo = Repo::new(target);
     repo.add_remote(REMOTE);
@@ -122,7 +125,7 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
 
 pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, cookbook: Option<S>) -> Result<()> {
     let mut context = liner::Context::new();
-    
+
     macro_rules! prompt {
         ($dst:expr, $def:expr, $($arg:tt)*) => (if config.general.prompt {
             match unwrap_or_prompt($dst, &mut context, &format!($($arg)*)) {
@@ -215,7 +218,7 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, coo
             gid: None
         }.create(&output_dir)?;
     }
-    
+
     if !shadow.is_empty() {
         FileConfig {
             path: "/etc/shadow".to_string(),
