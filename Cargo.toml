@@ -16,13 +16,13 @@ path = "src/lib.rs"
 
 [dependencies]
 arg_parser = "0.1.0"
-argon2rs = { version = "0.2.5", default-features = false }
 liner = "0.4.4"
 libc = "0.2.54"
 failure = "0.1.5"
 rand = "0.6.5"
 redox_pkgutils = "0.1.2"
 redoxfs = "0.3.3"
+rust-argon2 = "0.5"
 serde = "1.0.91"
 serde_derive = "1.0.91"
 termion = "1.5.2"

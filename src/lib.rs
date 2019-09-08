@@ -2,7 +2,7 @@
 
 #[macro_use]
 extern crate serde_derive;
-extern crate argon2rs;
+extern crate argon2;
 extern crate libc;
 extern crate liner;
 extern crate failure;
@@ -15,8 +15,6 @@ mod config;
 pub use config::Config;
 use config::file::FileConfig;
 
-use argon2rs::verifier::Encoded;
-use argon2rs::{Argon2, Variant};
 use failure::{Error, err_msg};
 use rand::{RngCore, rngs::OsRng};
 use termion::input::TermRead;
@@ -36,17 +34,10 @@ const REMOTE: &'static str = "https://static.redox-os.org/pkg";
 /// by redox_users. If the password is blank, the hash is blank.
 fn hash_password(password: &str) -> Result<String> {
     if password != "" {
-        let a2 = Argon2::new(10, 1, 4096, Variant::Argon2i)?;
         let salt = format!("{:X}", OsRng::new()?.next_u64());
-        let enc = Encoded::new(
-            a2,
-            password.as_bytes(),
-            salt.as_bytes(),
-            &[],
-            &[]
-        );
-
-        Ok(String::from_utf8(enc.to_u8())?)
+        let config = argon2::Config::default();
+        let hash = argon2::hash_encoded(password.as_bytes(), salt.as_bytes(), &config)?;
+        Ok(hash)
     } else {
         Ok("".to_string())
     }
