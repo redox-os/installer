@@ -10,6 +10,10 @@ repository = "https://gitlab.redox-os.org/redox-os/installer"
 name = "redox_installer"
 path = "src/bin/installer.rs"
 
+[[bin]]
+name = "redox_installer_tui"
+path = "src/bin/installer_tui.rs"
+
 [lib]
 name = "redox_installer"
 path = "src/lib.rs"
@@ -21,7 +25,7 @@ libc = "0.2.54"
 failure = "0.1.5"
 rand = "0.6.5"
 redox_pkgutils = "0.1.2"
-redoxfs = "0.3.3"
+redoxfs = "0.3.7"
 rust-argon2 = "0.5"
 serde = "1.0.91"
 serde_derive = "1.0.91"

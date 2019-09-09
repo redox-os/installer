@@ -1,0 +1,248 @@
+extern crate arg_parser;
+extern crate redox_installer;
+extern crate redoxfs;
+extern crate serde;
+extern crate toml;
+
+use redoxfs::{DiskFile, FileSystem};
+use std::{fs, io, process, sync, thread, time};
+use std::ops::DerefMut;
+use std::path::Path;
+use std::process::Command;
+
+#[cfg(not(target_os = "redox"))]
+fn disk_paths(_paths: &mut Vec<(String, u64)>) {}
+
+#[cfg(target_os = "redox")]
+fn disk_paths(paths: &mut Vec<(String, u64)>) {
+    let mut schemes = vec![];
+    match fs::read_dir(":") {
+        Ok(entries) => for entry_res in entries {
+            if let Ok(entry) = entry_res {
+                if let Ok(path) = entry.path().into_os_string().into_string() {
+                    let scheme = path.trim_start_matches(':').trim_matches('/');
+                    if scheme.starts_with("disk") {
+                        schemes.push(format!("{}:", scheme));
+                    }
+                }
+            }
+        },
+        Err(err) => {
+            eprintln!("installer_tui: failed to list schemes: {}", err);
+        }
+    }
+
+    for scheme in schemes {
+        match fs::read_dir(&scheme) {
+            Ok(entries) => for entry_res in entries {
+                if let Ok(entry) = entry_res {
+                    if let Ok(path) = entry.path().into_os_string().into_string() {
+                        if let Ok(metadata) = entry.metadata() {
+                            let size = metadata.len();
+                            if size > 0 {
+                                paths.push((path, size));
+                            }
+                        }
+                    }
+                }
+            },
+            Err(err) => {
+                eprintln!("installer_tui: failed to list '{}': {}", scheme, err);
+            }
+        }
+    }
+}
+
+const KB: u64 = 1024;
+const MB: u64 = 1024 * KB;
+const GB: u64 = 1024 * MB;
+const TB: u64 = 1024 * GB;
+
+fn format_size(size: u64) -> String {
+    if size % TB == 0 {
+        format!("{} TB", size / TB)
+    } else if size % GB == 0 {
+        format!("{} GB", size / GB)
+    } else if size % MB == 0 {
+        format!("{} MB", size / MB)
+    } else if size % KB == 0 {
+        format!("{} KB", size / KB)
+    } else {
+        format!("{} B", size)
+    }
+}
+
+fn with_redoxfs<P, T, F>(disk_path: &P, bootloader: &[u8], callback: F)
+    -> T where
+        P: AsRef<Path>,
+        T: Send + Sync + 'static,
+        F: FnMut(&Path) -> T + Send + Sync + 'static
+{
+    let mount_path = "file/installer_tui";
+
+    let res = {
+        let disk = DiskFile::open(disk_path).unwrap();
+
+        if cfg!(not(target_os = "redox")) {
+            if ! Path::new(mount_path).exists() {
+                fs::create_dir(mount_path).unwrap();
+            }
+        }
+
+        let ctime = time::SystemTime::now().duration_since(time::UNIX_EPOCH).unwrap();
+        let fs = FileSystem::create_reserved(disk, bootloader, ctime.as_secs(), ctime.subsec_nanos()).unwrap();
+
+        let callback_mutex = sync::Arc::new(sync::Mutex::new(callback));
+        let join_handle = redoxfs::mount(fs, mount_path, move |real_path| {
+            let callback_mutex = callback_mutex.clone();
+            let real_path = real_path.to_owned();
+            thread::spawn(move || {
+                let res = {
+                    let mut callback_guard = callback_mutex.lock().unwrap();
+                    let callback = callback_guard.deref_mut();
+                    callback(&real_path)
+                };
+
+                if cfg!(target_os = "redox") {
+                    fs::remove_file(format!(":{}", mount_path)).unwrap();
+                } else {
+                    let status_res = if cfg!(target_os = "linux") {
+                        Command::new("fusermount")
+                            .arg("-u")
+                            .arg(mount_path)
+                            .status()
+                    } else {
+                        Command::new("umount")
+                            .arg(mount_path)
+                            .status()
+                    };
+
+                    let status = status_res.unwrap();
+                    if ! status.success() {
+                        panic!("umount failed");
+                    }
+                }
+
+                res
+            })
+        }).unwrap();
+
+        join_handle.join().unwrap()
+    };
+
+    fs::remove_file(disk_path).unwrap();
+
+    if cfg!(not(target_os = "redox")) {
+        fs::remove_dir(mount_path).unwrap();
+    }
+
+    res
+}
+
+fn main() {
+    let disk_path = {
+        let mut paths = Vec::new();
+        disk_paths(&mut paths);
+        loop {
+            for (i, (path, size)) in paths.iter().enumerate() {
+                eprintln!("\x1B[1m{}\x1B[0m: {}: {}", i + 1, path, format_size(*size));
+            }
+
+            if paths.is_empty() {
+                eprintln!("installer_tui: no drives found");
+                process::exit(1);
+            } else {
+                eprint!("Select a drive from 1 to {}: ", paths.len());
+
+                let mut line = String::new();
+                match io::stdin().read_line(&mut line) {
+                    Ok(0) => {
+                        eprintln!("installer_tui: failed to read line: end of input");
+                        process::exit(1);
+                    },
+                    Ok(_) => (),
+                    Err(err) => {
+                        eprintln!("installer_tui: failed to read line: {}", err);
+                        process::exit(1);
+                    }
+                }
+
+                match line.trim().parse::<usize>() {
+                    Ok(i) => {
+                        if i >= 1 && i <= paths.len() {
+                            break paths[i - 1].0.clone();
+                        } else {
+                            eprintln!("{} not from 1 to {}", i, paths.len());
+                        }
+                    },
+                    Err(err) => {
+                        eprintln!("invalid input: {}", err);
+                    }
+                }
+            }
+        }
+    };
+
+    let bootloader = {
+        let path = "file:/bootloader";
+        match fs::read(path) {
+            Ok(ok) => ok,
+            Err(err) => {
+                eprintln!("installer_tui: {}: failed to read: {}", path, err);
+                process::exit(1);
+            }
+        }
+    };
+
+    let res = with_redoxfs(&disk_path, &bootloader, |mount_path| -> Result<(), failure::Error> {
+        let config = {
+            let path = "file:/filesystem.toml";
+            match fs::read_to_string(path) {
+                Ok(config_data) => {
+                    match toml::from_str(&config_data) {
+                        Ok(config) => {
+                            config
+                        },
+                        Err(err) => {
+                            eprintln!("installer_tui: {}: failed to decode: {}", path, err);
+                            return Err(failure::Error::from_boxed_compat(
+                                Box::new(err))
+                            );
+                        }
+                    }
+                },
+                Err(err) => {
+                    eprintln!("installer_tui: {}: failed to read: {}", path, err);
+                    return Err(failure::Error::from_boxed_compat(
+                        Box::new(err))
+                    );
+                }
+            }
+        };
+
+        for name in &["bootloader", "filesystem.toml", "kernel"] {
+            eprintln!("copy {}", name);
+
+            let src = format!("file:/{}", name);
+            let dest = mount_path.join(name);
+            match fs::copy(&src, &dest) {
+                Ok(_) => (),
+                Err(err) => {
+                    eprintln!("installer_tui: {}: failed to copy to {}: {}", src, dest.display(), err);
+                    return Err(failure::Error::from_boxed_compat(
+                        Box::new(err))
+                    );
+                }
+            }
+        };
+
+        let cookbook: Option<&'static str> = None;
+
+        redox_installer::install(config, mount_path, cookbook)
+    });
+
+    if let Err(err) = res {
+        eprintln!("installer_tui: failed to install: {}", err);
+        process::exit(1);
+    }
+}
