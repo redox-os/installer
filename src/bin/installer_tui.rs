@@ -137,6 +137,8 @@ fn with_redoxfs<P, T, F>(disk_path: &P, bootloader: &[u8], callback: F)
 
 fn package_files(config: &mut Config, files: &mut Vec<String>) -> io::Result<()> {
     //TODO: Remove packages from config where all files are located (and have valid shasum?)
+    config.packages.clear();
+
     for entry_res in fs::read_dir("file:/pkg")? {
         let entry = entry_res?;
         let path = entry.path();
@@ -286,11 +288,11 @@ fn main() {
 
         eprintln!("finished copying {} files", files.len());
 
-        // Packages will be copied locally, not installed from package server
-        config.packages.clear();
-
         let cookbook: Option<&'static str> = None;
-        redox_installer::install(config, mount_path, cookbook)
+        redox_installer::install(config, mount_path, cookbook)?;
+
+        eprintln!("finished installing, unmounting filesystem");
+        Ok(())
     });
 
     if let Err(err) = res {
