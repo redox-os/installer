@@ -4,8 +4,10 @@ extern crate redoxfs;
 extern crate serde;
 extern crate toml;
 
+use redox_installer::Config;
 use redoxfs::{DiskFile, FileSystem};
 use std::{fs, io, process, sync, thread, time};
+use std::ffi::OsStr;
 use std::ops::DerefMut;
 use std::path::Path;
 use std::process::Command;
@@ -130,13 +132,33 @@ fn with_redoxfs<P, T, F>(disk_path: &P, bootloader: &[u8], callback: F)
         join_handle.join().unwrap()
     };
 
-    fs::remove_file(disk_path).unwrap();
+    res
+}
 
-    if cfg!(not(target_os = "redox")) {
-        fs::remove_dir(mount_path).unwrap();
+fn package_files(config: &mut Config, files: &mut Vec<String>) -> io::Result<()> {
+    //TODO: Remove packages from config where all files are located (and have valid shasum?)
+    for entry_res in fs::read_dir("file:/pkg")? {
+        let entry = entry_res?;
+        let path = entry.path();
+        if path.extension() == Some(OsStr::new("sha256sums")) {
+            let sha256sums = fs::read_to_string(&path)?;
+            for line in sha256sums.lines() {
+                //TODO: Support binary format (second space turns into an asterisk)
+                let mut parts = line.splitn(2, "  ");
+                let _sha256sum = parts.next().ok_or(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Missing checksum in sha256sums"
+                ))?;
+                let name = parts.next().ok_or(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Missing filename in sha256sums"
+                ))?;
+                files.push(name.to_string());
+            }
+        }
     }
 
-    res
+    Ok(())
 }
 
 fn main() {
@@ -195,7 +217,7 @@ fn main() {
     };
 
     let res = with_redoxfs(&disk_path, &bootloader, |mount_path| -> Result<(), failure::Error> {
-        let config = {
+        let mut config = {
             let path = "file:/filesystem.toml";
             match fs::read_to_string(path) {
                 Ok(config_data) => {
@@ -220,11 +242,37 @@ fn main() {
             }
         };
 
-        for name in &["bootloader", "filesystem.toml", "kernel"] {
-            eprintln!("copy {}", name);
+        // Copy bootloader, filesystem.toml, and kernel
+        let mut files = vec![
+            "bootloader".to_string(),
+            "filesystem.toml".to_string(),
+            "kernel".to_string()
+        ];
+
+        // Copy files from locally installed packages
+        if let Err(err) = package_files(&mut config, &mut files) {
+            eprintln!("installer_tui: failed to read package files: {}", err);
+            return Err(failure::Error::from_boxed_compat(
+                Box::new(err))
+            );
+        }
+
+        for (i, name) in files.iter().enumerate() {
+            eprintln!("copy {} [{}/{}]", name, i, files.len());
 
             let src = format!("file:/{}", name);
             let dest = mount_path.join(name);
+            if let Some(parent) = dest.parent() {
+                match fs::create_dir_all(&parent) {
+                    Ok(()) => (),
+                    Err(err) => {
+                        eprintln!("installer_tui: failed to create directory {}: {}", parent.display(), err);
+                        return Err(failure::Error::from_boxed_compat(
+                            Box::new(err))
+                        );
+                    }
+                }
+            }
             match fs::copy(&src, &dest) {
                 Ok(_) => (),
                 Err(err) => {
@@ -236,8 +284,12 @@ fn main() {
             }
         };
 
-        let cookbook: Option<&'static str> = None;
+        eprintln!("finished copying {} files", files.len());
 
+        // Packages will be copied locally, not installed from package server
+        config.packages.clear();
+
+        let cookbook: Option<&'static str> = None;
         redox_installer::install(config, mount_path, cookbook)
     });
 
