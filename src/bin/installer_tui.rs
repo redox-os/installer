@@ -8,6 +8,7 @@ use redox_installer::Config;
 use redoxfs::{DiskFile, FileSystem};
 use std::{fs, io, process, sync, thread, time};
 use std::ffi::OsStr;
+use std::io::{Read, Write};
 use std::ops::DerefMut;
 use std::path::Path;
 use std::process::Command;
@@ -259,6 +260,7 @@ fn main() {
             );
         }
 
+        let mut buf = vec![0; 4 * 1024 * 1024];
         for (i, name) in files.iter().enumerate() {
             eprintln!("copy {} [{}/{}]", name, i, files.len());
 
@@ -275,28 +277,72 @@ fn main() {
                     }
                 }
             }
-            match fs::copy(&src, &dest) {
-                Ok(_) => (),
-                Err(err) => {
-                    eprintln!("installer_tui: {}: failed to copy to {}: {}", src, dest.display(), err);
-                    return Err(failure::Error::from_boxed_compat(
-                        Box::new(err))
-                    );
+
+            {
+                let mut src_file = match fs::File::open(&src) {
+                    Ok(ok) => ok,
+                    Err(err) => {
+                        eprintln!("installer_tui: failed to open file {}: {}", src, err);
+                        return Err(failure::Error::from_boxed_compat(
+                            Box::new(err))
+                        );
+                    }
+                };
+
+                let mut dest_file = match fs::File::create(&dest) {
+                    Ok(ok) => ok,
+                    Err(err) => {
+                        eprintln!("installer_tui: failed to create file {}: {}", dest.display(), err);
+                        return Err(failure::Error::from_boxed_compat(
+                            Box::new(err))
+                        );
+                    }
+                };
+
+                loop {
+                    let count = match src_file.read(&mut buf) {
+                        Ok(ok) => ok,
+                        Err(err) => {
+                            eprintln!("installer_tui: failed to read file {}: {}", src, err);
+                            return Err(failure::Error::from_boxed_compat(
+                                Box::new(err))
+                            );
+                        }
+                    };
+
+                    if count == 0 {
+                        break;
+                    }
+
+                    match dest_file.write_all(&buf[..count]) {
+                        Ok(()) => (),
+                        Err(err) => {
+                            eprintln!("installer_tui: failed to write file {}: {}", dest.display(), err);
+                            return Err(failure::Error::from_boxed_compat(
+                                Box::new(err))
+                            );
+                        }
+                    }
                 }
             }
-        };
+        }
 
         eprintln!("finished copying {} files", files.len());
 
         let cookbook: Option<&'static str> = None;
-        redox_installer::install(config, mount_path, cookbook)?;
+        redox_installer::install(config, mount_path, cookbook).map_err(|err| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                err
+            )
+        })?;
 
         eprintln!("finished installing, unmounting filesystem");
         Ok(())
     });
 
     if let Err(err) = res {
-        eprintln!("installer_tui: failed to install: {}", err);
+        eprintln!("installer_tui: failed to install: {:?}", err);
         process::exit(1);
     }
 }
