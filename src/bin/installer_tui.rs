@@ -338,11 +338,18 @@ fn main() {
         })?;
 
         eprintln!("finished installing, unmounting filesystem");
+
         Ok(())
     });
 
-    if let Err(err) = res {
-        eprintln!("installer_tui: failed to install: {:?}", err);
-        process::exit(1);
+    match res {
+        Ok(()) => {
+            eprintln!("installer_tui: installed successfully");
+            process::exit(0);
+        },
+        Err(err) => {
+            eprintln!("installer_tui: failed to install: {:?}", err);
+            process::exit(1);
+        }
     }
 }
