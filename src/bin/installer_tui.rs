@@ -18,12 +18,13 @@ fn disk_paths(_paths: &mut Vec<(String, u64)>) {}
 
 #[cfg(target_os = "redox")]
 fn disk_paths(paths: &mut Vec<(String, u64)>) {
-    let mut schemes = vec![];
+    let mut schemes = Vec::new();
     match fs::read_dir(":") {
         Ok(entries) => for entry_res in entries {
             if let Ok(entry) = entry_res {
-                if let Ok(path) = entry.path().into_os_string().into_string() {
-                    let scheme = path.trim_start_matches(':').trim_matches('/');
+                let path = entry.path();
+                if let Ok(path_str) = path.into_os_string().into_string() {
+                    let scheme = path_str.trim_start_matches(':').trim_matches('/');
                     if scheme.starts_with("disk") {
                         schemes.push(format!("{}:", scheme));
                     }
@@ -36,21 +37,26 @@ fn disk_paths(paths: &mut Vec<(String, u64)>) {
     }
 
     for scheme in schemes {
-        match fs::read_dir(&scheme) {
-            Ok(entries) => for entry_res in entries {
-                if let Ok(entry) = entry_res {
-                    if let Ok(path) = entry.path().into_os_string().into_string() {
-                        if let Ok(metadata) = entry.metadata() {
-                            let size = metadata.len();
-                            if size > 0 {
-                                paths.push((path, size));
+        let is_dir = fs::metadata(&scheme)
+            .map(|x| x.is_dir())
+            .unwrap_or(false);
+        if is_dir {
+            match fs::read_dir(&scheme) {
+                Ok(entries) => for entry_res in entries {
+                    if let Ok(entry) = entry_res {
+                        if let Ok(path) = entry.path().into_os_string().into_string() {
+                            if let Ok(metadata) = entry.metadata() {
+                                let size = metadata.len();
+                                if size > 0 {
+                                    paths.push((path, size));
+                                }
                             }
                         }
                     }
+                },
+                Err(err) => {
+                    eprintln!("installer_tui: failed to list '{}': {}", scheme, err);
                 }
-            },
-            Err(err) => {
-                eprintln!("installer_tui: failed to list '{}': {}", scheme, err);
             }
         }
     }
