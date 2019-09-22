@@ -1,5 +1,3 @@
-#![deny(warnings)]
-
 #[macro_use]
 extern crate serde_derive;
 extern crate argon2;
@@ -115,18 +113,22 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
 }
 
 pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, cookbook: Option<S>) -> Result<()> {
-    let mut context = liner::Context::new();
+    //let mut context = liner::Context::new();
 
     macro_rules! prompt {
         ($dst:expr, $def:expr, $($arg:tt)*) => (if config.general.prompt {
-            match unwrap_or_prompt($dst, &mut context, &format!($($arg)*)) {
-                Ok(res) => if res.is_empty() {
-                    Ok($def)
-                } else {
-                    Ok(res)
-                },
-                Err(err) => Err(err)
-            }
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "prompt not currently supported"
+            ))
+            // match unwrap_or_prompt($dst, &mut context, &format!($($arg)*)) {
+            //     Ok(res) => if res.is_empty() {
+            //         Ok($def)
+            //     } else {
+            //         Ok(res)
+            //     },
+            //     Err(err) => Err(err)
+            // }
         } else {
             Ok($dst.unwrap_or($def))
         })
