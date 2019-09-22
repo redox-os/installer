@@ -142,6 +142,27 @@ fn with_redoxfs<P, T, F>(disk_path: &P, bootloader: &[u8], callback: F)
     res
 }
 
+fn dir_files(dir: &str, files: &mut Vec<String>) -> io::Result<()> {
+    for entry_res in fs::read_dir(&format!("file:/{}", dir))? {
+        let entry = entry_res?;
+        let path = entry.path();
+        let path_str = path.into_os_string().into_string().map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Failed to convert Path to &str"
+            )
+        })?;
+        let path_trimmed = path_str.trim_start_matches("file:/");
+        let metadata = entry.metadata()?;
+        if metadata.is_dir() {
+            dir_files(path_trimmed, files);
+        } else {
+            files.push(path_trimmed.to_string());
+        }
+    }
+    Ok(())
+}
+
 fn package_files(config: &mut Config, files: &mut Vec<String>) -> io::Result<()> {
     //TODO: Remove packages from config where all files are located (and have valid shasum?)
     config.packages.clear();
@@ -258,6 +279,17 @@ fn main() {
             "kernel".to_string()
         ];
 
+        // Copy files in /include, /lib, and /pkg
+        //TODO: Convert this data into package data
+        for dir in ["include", "lib", "pkg"].iter() {
+            if let Err(err) = dir_files(dir, &mut files) {
+                eprintln!("installer_tui: failed to read files from {}: {}", dir, err);
+                return Err(failure::Error::from_boxed_compat(
+                    Box::new(err))
+                );
+            }
+        }
+
         // Copy files from locally installed packages
         if let Err(err) = package_files(&mut config, &mut files) {
             eprintln!("installer_tui: failed to read package files: {}", err);
@@ -283,6 +315,8 @@ fn main() {
                     }
                 }
             }
+
+            //TODO: match file type to support symlinks
 
             {
                 let mut src_file = match fs::File::open(&src) {
