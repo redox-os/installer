@@ -32,7 +32,7 @@ const REMOTE: &'static str = "https://static.redox-os.org/pkg";
 /// by redox_users. If the password is blank, the hash is blank.
 fn hash_password(password: &str) -> Result<String> {
     if password != "" {
-        let salt = format!("{:X}", OsRng::new()?.next_u64());
+        let salt = format!("{:X}", OsRng.next_u64());
         let config = argon2::Config::default();
         let hash = argon2::hash_encoded(password.as_bytes(), salt.as_bytes(), &config)?;
         Ok(hash)
@@ -45,7 +45,11 @@ fn unwrap_or_prompt<T: FromStr>(option: Option<T>, context: &mut liner::Context,
     match option {
         Some(t) => Ok(t),
         None => {
-            let line = context.read_line(prompt, &mut |_| {})?;
+            let line = context.read_line(
+                prompt,
+                None,
+                &mut liner::BasicCompleter::new(Vec::<String>::new())
+            )?;
             T::from_str(&line).map_err(|_err| err_msg("failed to parse input"))
         }
     }
