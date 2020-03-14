@@ -103,10 +103,20 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
 
         for (packagename, _package) in &config.packages {
             println!("Installing package {}", packagename);
-            let path = format!("{}/{}/repo/{}/{}.tar.gz",
-                               env::current_dir().unwrap().to_string_lossy(),
-                               cookbook.as_ref(), target, packagename);
-            Package::from_path(&path).unwrap().install(dest).unwrap();
+            let pkgar_path = format!("{}/{}/repo/{}/{}.pkgar",
+                                     env::current_dir().unwrap().to_string_lossy(),
+                                     cookbook.as_ref(), target, packagename);
+            if Path::new(&pkgar_path).exists() {
+                let public_path = format!("{}/{}/build/public.key",
+                                          env::current_dir().unwrap().to_string_lossy(),
+                                          cookbook.as_ref());
+                pkgar::bin::extract(&public_path, &pkgar_path, dest).unwrap();
+            } else {
+                let path = format!("{}/{}/repo/{}/{}.tar.gz",
+                                   env::current_dir().unwrap().to_string_lossy(),
+                                   cookbook.as_ref(), target, packagename);
+                Package::from_path(&path).unwrap().install(dest).unwrap();
+            }
         }
     } else {
         for (packagename, _package) in &config.packages {
