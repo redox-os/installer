@@ -1,6 +1,6 @@
 [package]
 name = "redox_installer"
-version = "0.2.6"
+version = "0.2.7"
 description = "A Redox filesystem builder"
 license = "MIT"
 authors = ["Jeremy Soller <jackpot51@gmail.com>"]
@@ -22,14 +22,20 @@ path = "src/lib.rs"
 [dependencies]
 arg_parser = "0.1.0"
 redox_liner = "0.5.1"
-libc = "0.2.66"
-failure = "0.1.6"
-pkgar = "0.1"
+libc = "0.2.70"
+failure = "0.1.8"
+pkgar = "0.1.6"
 rand = "0.7.3"
-redox_pkgutils = "0.1.5"
-redoxfs = "0.4.0"
-rust-argon2 = "0.6.1"
-serde = "1.0.104"
-serde_derive = "1.0.104"
-termion = "1.5.4"
+redox_pkgutils = "0.1.6"
+redoxfs = "0.4.1"
+rust-argon2 = "0.8.2"
+serde = "1.0.110"
+serde_derive = "1.0.110"
+termion = "1.5.5"
 toml = "0.5.6"
+
+[patch.crates-io]
+libc = { git = "https://github.com/rust-lang/libc.git" }
+pbr = { git = "https://github.com/jackpot51/pb.git" }
+ring = { git = "https://gitlab.redox-os.org/redox-os/ring.git", branch = "redox-unix-0.13.5" }
+tar = { git = "https://github.com/jackpot51/tar-rs.git" }
