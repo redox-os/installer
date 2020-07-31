@@ -19,6 +19,7 @@ use termion::input::TermRead;
 use pkgutils::{Repo, Package};
 
 use std::env;
+use std::fs;
 use std::io::{self, stderr, Write};
 use std::path::Path;
 use std::process::{self, Command};
@@ -88,7 +89,8 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
     repo.add_remote(REMOTE);
 
     if let Some(cookbook) = cookbook {
-        let status = Command::new("./repo.sh")
+        let repo_sh_path = fs::canonicalize("cookbook/repo.sh").unwrap().into_os_string();
+        let status = Command::new(repo_sh_path)
             .current_dir(cookbook.as_ref())
             .args(config.packages.keys())
             .spawn()
