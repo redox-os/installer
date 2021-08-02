@@ -68,13 +68,13 @@ const GB: u64 = 1024 * MB;
 const TB: u64 = 1024 * GB;
 
 fn format_size(size: u64) -> String {
-    if size % TB == 0 {
+    if size >= TB {
         format!("{} TB", size / TB)
-    } else if size % GB == 0 {
+    } else if size >= GB {
         format!("{} GB", size / GB)
-    } else if size % MB == 0 {
+    } else if size >= MB {
         format!("{} MB", size / MB)
-    } else if size % KB == 0 {
+    } else if size >= KB {
         format!("{} KB", size / KB)
     } else {
         format!("{} B", size)
