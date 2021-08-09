@@ -350,7 +350,8 @@ pub fn install<P, S>(config: Config, output: P, cookbook: Option<S>)
         P: AsRef<Path>,
         S: AsRef<str>,
 {
-    println!("Install {:#?} to {}", config, output.as_ref().display());
+    println!("Installing following config to {}:", output.as_ref().display());
+    println!("{}", config);
 
     if output.as_ref().is_dir() {
         install_dir(config, output, cookbook)
