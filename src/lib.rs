@@ -28,7 +28,7 @@ use std::{
     io::{self, stderr, Write},
     path::Path,
     process::{self, Command},
-    str::FromStr,
+    // str::FromStr,
     sync::mpsc::channel,
     time::{SystemTime, UNIX_EPOCH},
     thread,
@@ -55,19 +55,19 @@ fn syscall_error(err: syscall::Error) -> io::Error {
     io::Error::from_raw_os_error(err.errno)
 }
 
-fn unwrap_or_prompt<T: FromStr>(option: Option<T>, context: &mut liner::Context, prompt: &str) -> Result<T> {
-    match option {
-        Some(t) => Ok(t),
-        None => {
-            let line = context.read_line(
-                prompt,
-                None,
-                &mut liner::BasicCompleter::new(Vec::<String>::new())
-            )?;
-            T::from_str(&line).map_err(|_err| err_msg("failed to parse input"))
-        }
-    }
-}
+// fn unwrap_or_prompt<T: FromStr>(option: Option<T>, context: &mut liner::Context, prompt: &str) -> Result<T> {
+//     match option {
+//         Some(t) => Ok(t),
+//         None => {
+//             let line = context.read_line(
+//                 prompt,
+//                 None,
+//                 &mut liner::BasicCompleter::new(Vec::<String>::new())
+//             )?;
+//             T::from_str(&line).map_err(|_err| err_msg("failed to parse input"))
+//         }
+//     }
+// }
 
 /// Returns a password collected from the user (plaintext)
 fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
