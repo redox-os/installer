@@ -99,7 +99,7 @@ fn with_redoxfs<P, T, F>(disk_path: &P, bootloader: &[u8], callback: F)
         }
 
         let ctime = time::SystemTime::now().duration_since(time::UNIX_EPOCH).unwrap();
-        let fs = FileSystem::create_reserved(disk, bootloader, ctime.as_secs(), ctime.subsec_nanos()).unwrap();
+        let fs = FileSystem::create_reserved(disk, None, bootloader, ctime.as_secs(), ctime.subsec_nanos()).unwrap();
 
         let callback_mutex = sync::Arc::new(sync::Mutex::new(callback));
         let join_handle = redoxfs::mount(fs, mount_path, move |real_path| {
