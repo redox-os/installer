@@ -2,6 +2,7 @@ extern crate arg_parser;
 extern crate redox_installer;
 extern crate redoxfs;
 extern crate serde;
+extern crate termion;
 extern crate toml;
 
 use redox_installer::Config;
@@ -12,6 +13,7 @@ use std::io::{Read, Write};
 use std::ops::DerefMut;
 use std::path::Path;
 use std::process::Command;
+use termion::input::TermRead;
 
 #[cfg(not(target_os = "redox"))]
 fn disk_paths(_paths: &mut Vec<(String, u64)>) {}
@@ -81,7 +83,7 @@ fn format_size(size: u64) -> String {
     }
 }
 
-fn with_redoxfs<P, T, F>(disk_path: &P, bootloader: &[u8], callback: F)
+fn with_redoxfs<P, T, F>(disk_path: &P, password_opt: Option<&[u8]>, bootloader: &[u8], callback: F)
     -> T where
         P: AsRef<Path>,
         T: Send + Sync + 'static,
@@ -99,7 +101,7 @@ fn with_redoxfs<P, T, F>(disk_path: &P, bootloader: &[u8], callback: F)
         }
 
         let ctime = time::SystemTime::now().duration_since(time::UNIX_EPOCH).unwrap();
-        let fs = FileSystem::create_reserved(disk, None, bootloader, ctime.as_secs(), ctime.subsec_nanos()).unwrap();
+        let fs = FileSystem::create_reserved(disk, password_opt, bootloader, ctime.as_secs(), ctime.subsec_nanos()).unwrap();
 
         let callback_mutex = sync::Arc::new(sync::Mutex::new(callback));
         let join_handle = redoxfs::mount(fs, mount_path, move |real_path| {
@@ -163,91 +165,91 @@ fn dir_files(dir: &str, files: &mut Vec<String>) -> io::Result<()> {
     Ok(())
 }
 
-fn package_files(config: &mut Config, files: &mut Vec<String>) -> io::Result<()> {
-    //TODO: Remove packages from config where all files are located (and have valid shasum?)
-    config.packages.clear();
+fn choose_disk() -> String {
+    let mut paths = Vec::new();
+    disk_paths(&mut paths);
+    loop {
+        for (i, (path, size)) in paths.iter().enumerate() {
+            eprintln!("\x1B[1m{}\x1B[0m: {}: {}", i + 1, path, format_size(*size));
+        }
 
-    for entry_res in fs::read_dir("file:/pkg")? {
-        let entry = entry_res?;
-        let path = entry.path();
-        if path.extension() == Some(OsStr::new("sha256sums")) {
-            let sha256sums = fs::read_to_string(&path)?;
-            for line in sha256sums.lines() {
-                //TODO: Support binary format (second space turns into an asterisk)
-                let mut parts = line.splitn(2, "  ");
-                let _sha256sum = parts.next().ok_or(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Missing checksum in sha256sums"
-                ))?;
-                let name = parts.next().ok_or(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Missing filename in sha256sums"
-                ))?;
-                files.push(name.to_string());
+        if paths.is_empty() {
+            eprintln!("installer_tui: no drives found");
+            process::exit(1);
+        } else {
+            eprint!("Select a drive from 1 to {}: ", paths.len());
+
+            let mut line = String::new();
+            match io::stdin().read_line(&mut line) {
+                Ok(0) => {
+                    eprintln!("installer_tui: failed to read line: end of input");
+                    process::exit(1);
+                },
+                Ok(_) => (),
+                Err(err) => {
+                    eprintln!("installer_tui: failed to read line: {}", err);
+                    process::exit(1);
+                }
+            }
+
+            match line.trim().parse::<usize>() {
+                Ok(i) => {
+                    if i >= 1 && i <= paths.len() {
+                        break paths[i - 1].0.clone();
+                    } else {
+                        eprintln!("{} not from 1 to {}", i, paths.len());
+                    }
+                },
+                Err(err) => {
+                    eprintln!("invalid input: {}", err);
+                }
             }
         }
     }
+}
 
-    Ok(())
+fn choose_password() -> Option<String> {
+    eprint!("installer_tui: redoxfs password (empty for none): ");
+
+    let password = io::stdin()
+        .read_passwd(&mut io::stderr())
+        .unwrap()
+        .unwrap_or(String::new());
+
+    eprintln!();
+
+    if password.is_empty() {
+       return None;
+    }
+
+    Some(password)
 }
 
 fn main() {
-    let disk_path = {
-        let mut paths = Vec::new();
-        disk_paths(&mut paths);
-        loop {
-            for (i, (path, size)) in paths.iter().enumerate() {
-                eprintln!("\x1B[1m{}\x1B[0m: {}: {}", i + 1, path, format_size(*size));
-            }
+    let disk_path = choose_disk();
 
-            if paths.is_empty() {
-                eprintln!("installer_tui: no drives found");
-                process::exit(1);
-            } else {
-                eprint!("Select a drive from 1 to {}: ", paths.len());
-
-                let mut line = String::new();
-                match io::stdin().read_line(&mut line) {
-                    Ok(0) => {
-                        eprintln!("installer_tui: failed to read line: end of input");
-                        process::exit(1);
-                    },
-                    Ok(_) => (),
-                    Err(err) => {
-                        eprintln!("installer_tui: failed to read line: {}", err);
-                        process::exit(1);
-                    }
-                }
-
-                match line.trim().parse::<usize>() {
-                    Ok(i) => {
-                        if i >= 1 && i <= paths.len() {
-                            break paths[i - 1].0.clone();
-                        } else {
-                            eprintln!("{} not from 1 to {}", i, paths.len());
-                        }
-                    },
-                    Err(err) => {
-                        eprintln!("invalid input: {}", err);
-                    }
-                }
-            }
-        }
-    };
+    let password_opt = choose_password();
 
     let bootloader = {
         let path = "file:/bootloader";
-        match fs::read(path) {
+        let mut bootloader = match fs::read(path) {
             Ok(ok) => ok,
             Err(err) => {
                 eprintln!("installer_tui: {}: failed to read: {}", path, err);
                 process::exit(1);
             }
+        };
+
+        // Pad to 1MiB
+        while bootloader.len() < 1024 * 1024 {
+            bootloader.push(0);
         }
+
+        bootloader
     };
 
-    let res = with_redoxfs(&disk_path, &bootloader, |mount_path| -> Result<(), failure::Error> {
-        let mut config = {
+    let res = with_redoxfs(&disk_path, password_opt.as_ref().map(|x| x.as_bytes()), &bootloader, |mount_path| -> Result<(), failure::Error> {
+        let mut config: Config = {
             let path = "file:/filesystem.toml";
             match fs::read_to_string(path) {
                 Ok(config_data) => {
@@ -279,9 +281,9 @@ fn main() {
             "kernel".to_string()
         ];
 
-        // Copy files in /include, /lib, and /pkg
-        //TODO: Convert this data into package data
-        for dir in ["include", "lib", "pkg"].iter() {
+        // Copy files from known directories
+        //TODO: Use package data
+        for dir in ["bin", "etc", "include", "lib", "pkg", "share", "ssl", "ui"].iter() {
             if let Err(err) = dir_files(dir, &mut files) {
                 eprintln!("installer_tui: failed to read files from {}: {}", dir, err);
                 return Err(failure::Error::from_boxed_compat(
@@ -290,13 +292,8 @@ fn main() {
             }
         }
 
-        // Copy files from locally installed packages
-        if let Err(err) = package_files(&mut config, &mut files) {
-            eprintln!("installer_tui: failed to read package files: {}", err);
-            return Err(failure::Error::from_boxed_compat(
-                Box::new(err))
-            );
-        }
+        // Packages are copied by previous code
+        config.packages.clear();
 
         let mut buf = vec![0; 4 * 1024 * 1024];
         for (i, name) in files.iter().enumerate() {
