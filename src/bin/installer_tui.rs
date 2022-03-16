@@ -313,53 +313,13 @@ fn main() {
                 }
             }
 
-            //TODO: match file type to support symlinks
-
-            {
-                let mut src_file = match fs::File::open(&src) {
-                    Ok(ok) => ok,
-                    Err(err) => {
-                        eprintln!("installer_tui: failed to open file {}: {}", src, err);
-                        return Err(failure::Error::from_boxed_compat(
-                            Box::new(err))
-                        );
-                    }
-                };
-
-                let mut dest_file = match fs::File::create(&dest) {
-                    Ok(ok) => ok,
-                    Err(err) => {
-                        eprintln!("installer_tui: failed to create file {}: {}", dest.display(), err);
-                        return Err(failure::Error::from_boxed_compat(
-                            Box::new(err))
-                        );
-                    }
-                };
-
-                loop {
-                    let count = match src_file.read(&mut buf) {
-                        Ok(ok) => ok,
-                        Err(err) => {
-                            eprintln!("installer_tui: failed to read file {}: {}", src, err);
-                            return Err(failure::Error::from_boxed_compat(
-                                Box::new(err))
-                            );
-                        }
-                    };
-
-                    if count == 0 {
-                        break;
-                    }
-
-                    match dest_file.write_all(&buf[..count]) {
-                        Ok(()) => (),
-                        Err(err) => {
-                            eprintln!("installer_tui: failed to write file {}: {}", dest.display(), err);
-                            return Err(failure::Error::from_boxed_compat(
-                                Box::new(err))
-                            );
-                        }
-                    }
+            match fs::copy(&src, &dest) {
+                Ok(ok) => (),
+                Err(err) => {
+                    eprintln!("installer_tui: failed to copy file {} to {}: {}", src, dest.display(), err);
+                    return Err(failure::Error::from_boxed_compat(
+                        Box::new(err))
+                    );
                 }
             }
         }
