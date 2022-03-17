@@ -11,7 +11,7 @@ use std::path::Path;
 
 //type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct FileConfig {
     pub path: String,
     pub data: String,

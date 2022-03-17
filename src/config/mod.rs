@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
-mod general;
-pub(crate) mod file;
-mod package;
-mod user;
+pub mod general;
+pub mod file;
+pub mod package;
+pub mod user;
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Config {
     pub general: general::GeneralConfig,
     #[serde(default)]

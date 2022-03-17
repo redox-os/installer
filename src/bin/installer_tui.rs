@@ -1,18 +1,11 @@
 extern crate arg_parser;
 extern crate redox_installer;
-extern crate redoxfs;
 extern crate serde;
 extern crate termion;
 extern crate toml;
 
-use redox_installer::Config;
-use redoxfs::{DiskFile, FileSystem};
-use std::{fs, io, process, sync, thread, time};
-use std::ffi::OsStr;
-use std::io::{Read, Write};
-use std::ops::DerefMut;
-use std::path::Path;
-use std::process::Command;
+use redox_installer::{Config, with_redoxfs};
+use std::{fs, io, process};
 use termion::input::TermRead;
 
 #[cfg(not(target_os = "redox"))]
@@ -83,67 +76,6 @@ fn format_size(size: u64) -> String {
     }
 }
 
-fn with_redoxfs<P, T, F>(disk_path: &P, password_opt: Option<&[u8]>, bootloader: &[u8], callback: F)
-    -> T where
-        P: AsRef<Path>,
-        T: Send + Sync + 'static,
-        F: FnMut(&Path) -> T + Send + Sync + 'static
-{
-    let mount_path = "file/installer_tui";
-
-    let res = {
-        let disk = DiskFile::open(disk_path).unwrap();
-
-        if cfg!(not(target_os = "redox")) {
-            if ! Path::new(mount_path).exists() {
-                fs::create_dir(mount_path).unwrap();
-            }
-        }
-
-        let ctime = time::SystemTime::now().duration_since(time::UNIX_EPOCH).unwrap();
-        let fs = FileSystem::create_reserved(disk, password_opt, bootloader, ctime.as_secs(), ctime.subsec_nanos()).unwrap();
-
-        let callback_mutex = sync::Arc::new(sync::Mutex::new(callback));
-        let join_handle = redoxfs::mount(fs, mount_path, move |real_path| {
-            let callback_mutex = callback_mutex.clone();
-            let real_path = real_path.to_owned();
-            thread::spawn(move || {
-                let res = {
-                    let mut callback_guard = callback_mutex.lock().unwrap();
-                    let callback = callback_guard.deref_mut();
-                    callback(&real_path)
-                };
-
-                if cfg!(target_os = "redox") {
-                    fs::remove_file(format!(":{}", mount_path)).unwrap();
-                } else {
-                    let status_res = if cfg!(target_os = "linux") {
-                        Command::new("fusermount")
-                            .arg("-u")
-                            .arg(mount_path)
-                            .status()
-                    } else {
-                        Command::new("umount")
-                            .arg(mount_path)
-                            .status()
-                    };
-
-                    let status = status_res.unwrap();
-                    if ! status.success() {
-                        panic!("umount failed");
-                    }
-                }
-
-                res
-            })
-        }).unwrap();
-
-        join_handle.join().unwrap()
-    };
-
-    res
-}
-
 fn dir_files(dir: &str, files: &mut Vec<String>) -> io::Result<()> {
     for entry_res in fs::read_dir(&format!("file:/{}", dir))? {
         let entry = entry_res?;
@@ -157,7 +89,7 @@ fn dir_files(dir: &str, files: &mut Vec<String>) -> io::Result<()> {
         let path_trimmed = path_str.trim_start_matches("file:/");
         let metadata = entry.metadata()?;
         if metadata.is_dir() {
-            dir_files(path_trimmed, files);
+            dir_files(path_trimmed, files)?;
         } else {
             files.push(path_trimmed.to_string());
         }
@@ -283,7 +215,16 @@ fn main() {
 
         // Copy files from known directories
         //TODO: Use package data
-        for dir in ["bin", "etc", "include", "lib", "pkg", "share", "ssl", "ui"].iter() {
+        for dir in [
+            "bin",
+            "etc",
+            "include",
+            "lib",
+            "pkg",
+            "share",
+            "ssl",
+            "ui"
+        ].iter() {
             if let Err(err) = dir_files(dir, &mut files) {
                 eprintln!("installer_tui: failed to read files from {}: {}", dir, err);
                 return Err(failure::Error::from_boxed_compat(
@@ -295,7 +236,6 @@ fn main() {
         // Packages are copied by previous code
         config.packages.clear();
 
-        let mut buf = vec![0; 4 * 1024 * 1024];
         for (i, name) in files.iter().enumerate() {
             eprintln!("copy {} [{}/{}]", name, i, files.len());
 
@@ -314,7 +254,7 @@ fn main() {
             }
 
             match fs::copy(&src, &dest) {
-                Ok(ok) => (),
+                Ok(_) => (),
                 Err(err) => {
                     eprintln!("installer_tui: failed to copy file {} to {}: {}", src, dest.display(), err);
                     return Err(failure::Error::from_boxed_compat(

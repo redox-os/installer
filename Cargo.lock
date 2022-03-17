@@ -950,7 +950,7 @@ dependencies = [
 
 [[package]]
 name = "redox_installer"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "arg_parser",
  "failure",
@@ -959,6 +959,7 @@ dependencies = [
  "rand 0.8.5",
  "redox_liner",
  "redox_pkgutils",
+ "redox_syscall",
  "redoxfs",
  "rust-argon2",
  "serde",

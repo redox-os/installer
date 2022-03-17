@@ -1,4 +1,4 @@
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct UserConfig {
     pub password: Option<String>,
     pub uid: Option<u32>,

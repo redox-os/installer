@@ -1,4 +1,4 @@
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct PackageConfig {
     pub version: Option<String>,
     pub git: Option<String>,

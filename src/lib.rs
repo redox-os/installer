@@ -6,23 +6,33 @@ extern crate liner;
 extern crate failure;
 extern crate pkgutils;
 extern crate rand;
+extern crate redoxfs;
+extern crate syscall;
 extern crate termion;
 
 mod config;
 
 pub use config::Config;
 use config::file::FileConfig;
+use config::package::PackageConfig;
 
 use failure::{Error, err_msg};
 use rand::{RngCore, rngs::OsRng};
+use redoxfs::{DiskFile, FileSystem};
 use termion::input::TermRead;
 use pkgutils::{Repo, Package};
 
-use std::env;
-use std::io::{self, stderr, Write};
-use std::path::Path;
-use std::process::{self, Command};
-use std::str::FromStr;
+use std::{
+    env,
+    fs,
+    io::{self, stderr, Write},
+    path::Path,
+    process::{self, Command},
+    str::FromStr,
+    sync::mpsc::channel,
+    time::{SystemTime, UNIX_EPOCH},
+    thread,
+};
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -39,6 +49,10 @@ fn hash_password(password: &str) -> Result<String> {
     } else {
         Ok("".to_string())
     }
+}
+
+fn syscall_error(err: syscall::Error) -> io::Error {
+    io::Error::from_raw_os_error(err.errno)
 }
 
 fn unwrap_or_prompt<T: FromStr>(option: Option<T>, context: &mut liner::Context, prompt: &str) -> Result<T> {
@@ -76,6 +90,7 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
     }
 }
 
+//TODO: error handling
 fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option<S>) {
     let target = &env::var("TARGET").unwrap_or(
         option_env!("TARGET").map_or(
@@ -126,7 +141,7 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
     }
 }
 
-pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, cookbook: Option<S>) -> Result<()> {
+pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, cookbook: Option<S>) -> Result<()> {
     //let mut context = liner::Context::new();
 
     macro_rules! prompt {
@@ -150,9 +165,6 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, coo
 
     let output_dir = output_dir.as_ref();
 
-    println!("Install {:#?} to {}", config, output_dir.display());
-
-    // TODO: Mount disk if output is a file
     let output_dir = output_dir.to_owned();
 
     install_packages(&config, output_dir.to_str().unwrap(), cookbook);
@@ -239,4 +251,127 @@ pub fn install<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, coo
     }
 
     Ok(())
+}
+
+pub fn with_redoxfs<P, T, F>(disk_path: P, password_opt: Option<&[u8]>, bootloader: &[u8], callback: F)
+    -> Result<T> where
+        P: AsRef<Path>,
+        F: FnOnce(&Path) -> Result<T>
+{
+    let mount_path = if cfg!(target_os = "redox") {
+        "file/redox_installer"
+    } else {
+        "/tmp/redox_installer"
+    };
+
+    let disk = DiskFile::open(disk_path).map_err(syscall_error)?;
+
+    if cfg!(not(target_os = "redox")) {
+        if ! Path::new(mount_path).exists() {
+            fs::create_dir(mount_path)?;
+        }
+    }
+
+    let ctime = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let fs = FileSystem::create_reserved(
+        disk,
+        password_opt,
+        bootloader,
+        ctime.as_secs(),
+        ctime.subsec_nanos()
+    ).map_err(syscall_error)?;
+
+    let (tx, rx) = channel();
+    let join_handle = thread::spawn(move || {
+        let res = redoxfs::mount(
+            fs,
+            mount_path,
+            |real_path| {
+                tx.send(Ok(real_path.to_owned())).unwrap();
+            }
+        );
+        match res {
+            Ok(()) => (),
+            Err(err) => {
+                tx.send(Err(err)).unwrap();
+            },
+        };
+    });
+
+    let res = match rx.recv() {
+        Ok(ok) => match ok {
+            Ok(real_path) => callback(&real_path),
+            Err(err) => return Err(err.into()),
+        },
+        Err(_) => return Err(io::Error::new(
+            io::ErrorKind::NotConnected,
+            "redoxfs thread did not send a result"
+        ).into()),
+    };
+
+    if cfg!(target_os = "redox") {
+        fs::remove_file(format!(":{}", mount_path))?;
+    } else {
+        let status_res = if cfg!(target_os = "linux") {
+            Command::new("fusermount")
+                .arg("-u")
+                .arg(mount_path)
+                .status()
+        } else {
+            Command::new("umount")
+                .arg(mount_path)
+                .status()
+        };
+
+        let status = status_res?;
+        if ! status.success() {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "redoxfs umount failed"
+            ).into());
+        }
+    }
+
+    join_handle.join().unwrap();
+
+    res
+}
+
+pub fn install<P, S>(config: Config, output: P, cookbook: Option<S>)
+    -> Result<()> where
+        P: AsRef<Path>,
+        S: AsRef<str>,
+{
+    println!("Install {:#?} to {}", config, output.as_ref().display());
+
+    if output.as_ref().is_dir() {
+        install_dir(config, output, cookbook)
+    } else {
+        let bootloader = {
+            //TODO: make it safe to
+            let bootloader_dir = "/tmp/redox_installer_bootloader";
+            if Path::new(bootloader_dir).exists() {
+                fs::remove_dir_all(&bootloader_dir)?;
+            }
+
+            fs::create_dir(bootloader_dir)?;
+
+            let mut bootloader_config = Config::default();
+            bootloader_config.packages.insert("bootloader".to_string(), PackageConfig::default());
+            install_packages(&bootloader_config, bootloader_dir, cookbook.as_ref());
+
+            let mut bootloader = fs::read(Path::new(bootloader_dir).join("bootloader"))?;
+
+            // Pad to 1 MiB
+            while bootloader.len() < 1024 * 1024 {
+                bootloader.push(0);
+            }
+
+            bootloader
+        };
+
+        with_redoxfs(output, None, &bootloader, move |mount_path| -> Result<()> {
+            install_dir(config, mount_path, cookbook.as_ref())
+        })
+    }
 }
