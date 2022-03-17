@@ -122,10 +122,10 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
                                      env::current_dir().unwrap().to_string_lossy(),
                                      cookbook.as_ref(), target, packagename);
             if Path::new(&pkgar_path).exists() {
-                let public_path = format!("{}/{}/build/public.key",
+                let public_path = format!("{}/{}/build/id_ed25519.pub.toml",
                                           env::current_dir().unwrap().to_string_lossy(),
                                           cookbook.as_ref());
-                pkgar::bin::extract(&public_path, &pkgar_path, dest).unwrap();
+                pkgar::extract(&public_path, &pkgar_path, dest).unwrap();
             } else {
                 let path = format!("{}/{}/repo/{}/{}.tar.gz",
                                    env::current_dir().unwrap().to_string_lossy(),
