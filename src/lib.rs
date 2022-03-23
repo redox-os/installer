@@ -116,6 +116,11 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
             process::exit(1);
         }
 
+        let dest_pkg = format!("{}/pkg", dest);
+        if ! Path::new(&dest_pkg).exists() {
+            fs::create_dir(&dest_pkg).unwrap();
+        }
+
         for (packagename, _package) in &config.packages {
             println!("Installing package {}", packagename);
             let pkgar_path = format!("{}/{}/repo/{}/{}.pkgar",
@@ -127,7 +132,7 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
                                           cookbook.as_ref());
                 pkgar::extract(&public_path, &pkgar_path, dest).unwrap();
 
-                let head_path = format!("{}/pkg/{}.pkgar_head", dest, packagename);
+                let head_path = format!("{}/{}.pkgar_head", dest_pkg, packagename);
                 pkgar::split(&public_path, &pkgar_path, &head_path, Option::<&str>::None).unwrap();
             } else {
                 let path = format!("{}/{}/repo/{}/{}.tar.gz",
