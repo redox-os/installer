@@ -126,6 +126,9 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
                                           env::current_dir().unwrap().to_string_lossy(),
                                           cookbook.as_ref());
                 pkgar::extract(&public_path, &pkgar_path, dest).unwrap();
+
+                let head_path = format!("{}/pkg/{}.pkgar_head", dest, packagename);
+                pkgar::split(&public_path, &pkgar_path, &head_path, Option::<&str>::None).unwrap();
             } else {
                 let path = format!("{}/{}/repo/{}/{}.tar.gz",
                                    env::current_dir().unwrap().to_string_lossy(),
