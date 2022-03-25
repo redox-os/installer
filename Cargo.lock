@@ -1071,9 +1071,8 @@ checksum = "c4e4404b4e54e59e7bb5f5236b61d8e822c2a77b2e955be8072002ff7ff8d69c"
 
 [[package]]
 name = "redox_syscall"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8380fe0152551244f0747b1bf41737e0f8a74f97a14ccefd1148187271634f3c"
+version = "0.2.12"
+source = "git+https://gitlab.redox-os.org/4lDO2/syscall.git?branch=update-toolchain-2022#94de991da2a75c45be0b73b18adc26522fb6f4a8"
 dependencies = [
  "bitflags",
 ]
