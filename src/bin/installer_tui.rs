@@ -71,20 +71,20 @@ fn disk_paths(paths: &mut Vec<(String, u64)>) {
     }
 }
 
-const KB: u64 = 1024;
-const MB: u64 = 1024 * KB;
-const GB: u64 = 1024 * MB;
-const TB: u64 = 1024 * GB;
+const KIB: u64 = 1024;
+const MIB: u64 = 1024 * KIB;
+const GIB: u64 = 1024 * MIB;
+const TIB: u64 = 1024 * GIB;
 
 fn format_size(size: u64) -> String {
-    if size >= TB {
-        format!("{} TB", size / TB)
-    } else if size >= GB {
-        format!("{} GB", size / GB)
-    } else if size >= MB {
-        format!("{} MB", size / MB)
-    } else if size >= KB {
-        format!("{} KB", size / KB)
+    if size >= 4 * TIB {
+        format!("{:.1} TiB", size as f64 / TIB as f64)
+    } else if size >= GIB {
+        format!("{:.1} GiB", size as f64 / GIB as f64)
+    } else if size >= MIB {
+        format!("{:.1} MiB", size as f64 / MIB as f64)
+    } else if size >= KIB {
+        format!("{:.1} KiB", size as f64 / KIB as f64)
     } else {
         format!("{} B", size)
     }
@@ -271,7 +271,7 @@ fn main() {
         };
 
         // Pad to 1MiB
-        while bootloader.len() < 1024 * 1024 {
+        while bootloader.len() < MIB as usize {
             bootloader.push(0);
         }
 
@@ -314,7 +314,7 @@ fn main() {
         files.sort();
         files.dedup();
 
-        let mut buf = vec![0; 4 * 1024 * 1024];
+        let mut buf = vec![0; 4 * MIB as usize];
         for (i, name) in files.iter().enumerate() {
             eprintln!("copy {} [{}/{}]", name, i, files.len());
 
