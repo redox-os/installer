@@ -298,10 +298,11 @@ fn main() {
             }
         };
 
-        // Copy bootloader, filesystem.toml, and kernel
+        // Copy bootloader, filesystem.toml, initfs, and kernel
         let mut files = vec![
             "bootloader".to_string(),
             "filesystem.toml".to_string(),
+            "initfs".to_string(),
             "kernel".to_string()
         ];
 
