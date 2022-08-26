@@ -261,7 +261,7 @@ fn main() {
     let password_opt = choose_password();
 
     let bootloader = {
-        let path = root_path.join("bootloader");
+        let path = root_path.join("boot").join("bootloader.bios");
         let mut bootloader = match fs::read(&path) {
             Ok(ok) => ok,
             Err(err) => {
@@ -298,12 +298,9 @@ fn main() {
             }
         };
 
-        // Copy bootloader, filesystem.toml, initfs, and kernel
+        // Copy filesystem.toml, which is not packaged
         let mut files = vec![
-            "bootloader".to_string(),
             "filesystem.toml".to_string(),
-            "initfs".to_string(),
-            "kernel".to_string()
         ];
 
         // Copy files from locally installed packages
