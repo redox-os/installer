@@ -11,7 +11,7 @@ extern crate toml;
 use pkgar::{PackageHead, ext::EntryExt};
 use pkgar_core::PackageSrc;
 use pkgar_keys::PublicKeyFile;
-use redox_installer::{Config, with_redoxfs};
+use redox_installer::{Config, with_whole_disk};
 use std::{
     ffi::OsStr,
     fs,
@@ -260,25 +260,37 @@ fn main() {
 
     let password_opt = choose_password();
 
-    let bootloader = {
+    let bootloader_bios = {
         let path = root_path.join("boot").join("bootloader.bios");
-        let mut bootloader = match fs::read(&path) {
-            Ok(ok) => ok,
-            Err(err) => {
-                eprintln!("installer_tui: {}: failed to read: {}", path.display(), err);
-                process::exit(1);
+        if path.exists() {
+            match fs::read(&path) {
+                Ok(ok) => ok,
+                Err(err) => {
+                    eprintln!("installer_tui: {}: failed to read: {}", path.display(), err);
+                    process::exit(1);
+                }
             }
-        };
-
-        // Pad to 1MiB
-        while bootloader.len() < MIB as usize {
-            bootloader.push(0);
+        } else {
+            Vec::new()
         }
-
-        bootloader
     };
 
-    let res = with_redoxfs(&disk_path, password_opt.as_ref().map(|x| x.as_bytes()), &bootloader, |mount_path| -> Result<(), failure::Error> {
+    let bootloader_efi = {
+        let path = root_path.join("boot").join("bootloader.efi");
+        if path.exists() {
+            match fs::read(&path) {
+                Ok(ok) => ok,
+                Err(err) => {
+                    eprintln!("installer_tui: {}: failed to read: {}", path.display(), err);
+                    process::exit(1);
+                }
+            }
+        } else {
+            Vec::new()
+        }
+    };
+
+    let res = with_whole_disk(&disk_path, &bootloader_bios, &bootloader_efi, password_opt.as_ref().map(|x| x.as_bytes()), |mount_path| -> Result<(), failure::Error> {
         let mut config: Config = {
             let path = root_path.join("filesystem.toml");
             match fs::read_to_string(&path) {
@@ -324,7 +336,7 @@ fn main() {
         eprintln!("finished copying {} files", files.len());
 
         let cookbook: Option<&'static str> = None;
-        redox_installer::install(config, mount_path, cookbook).map_err(|err| {
+        redox_installer::install_dir(config, mount_path, cookbook).map_err(|err| {
             io::Error::new(
                 io::ErrorKind::Other,
                 err

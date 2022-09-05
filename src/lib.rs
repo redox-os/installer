@@ -3,6 +3,7 @@ extern crate serde_derive;
 extern crate argon2;
 extern crate libc;
 extern crate liner;
+#[macro_use]
 extern crate failure;
 extern crate pkgutils;
 extern crate rand;
@@ -18,11 +19,12 @@ use config::package::PackageConfig;
 
 use failure::{Error, err_msg};
 use rand::{RngCore, rngs::OsRng};
-use redoxfs::{DiskFile, FileSystem};
+use redoxfs::{Disk, DiskIo, FileSystem};
 use termion::input::TermRead;
 use pkgutils::{Repo, Package};
 
 use std::{
+    collections::BTreeMap,
     env,
     fs,
     io::{self, stderr, Write},
@@ -37,6 +39,15 @@ use std::{
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 const REMOTE: &'static str = "https://static.redox-os.org/pkg";
+
+fn get_target() -> String {
+    env::var("TARGET").unwrap_or(
+        option_env!("TARGET").map_or(
+            "x86_64-unknown-redox".to_string(),
+            |x| x.to_string()
+        )
+    )
+}
 
 /// Converts a password to a serialized argon2rs hash, understandable
 /// by redox_users. If the password is blank, the hash is blank.
@@ -92,12 +103,7 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
 
 //TODO: error handling
 fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option<S>) {
-    let target = &env::var("TARGET").unwrap_or(
-        option_env!("TARGET").map_or(
-            "x86_64-unknown-redox".to_string(),
-            |x| x.to_string()
-        )
-    );
+    let target = &get_target();
 
     let mut repo = Repo::new(target);
     repo.add_remote(REMOTE);
@@ -261,9 +267,9 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
     Ok(())
 }
 
-pub fn with_redoxfs<P, T, F>(disk_path: P, password_opt: Option<&[u8]>, bootloader: &[u8], callback: F)
+pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F)
     -> Result<T> where
-        P: AsRef<Path>,
+        D: Disk + Send + 'static,
         F: FnOnce(&Path) -> Result<T>
 {
     let mount_path = if cfg!(target_os = "redox") {
@@ -272,8 +278,6 @@ pub fn with_redoxfs<P, T, F>(disk_path: P, password_opt: Option<&[u8]>, bootload
         "/tmp/redox_installer"
     };
 
-    let disk = DiskFile::open(disk_path).map_err(syscall_error)?;
-
     if cfg!(not(target_os = "redox")) {
         if ! Path::new(mount_path).exists() {
             fs::create_dir(mount_path)?;
@@ -281,10 +285,9 @@ pub fn with_redoxfs<P, T, F>(disk_path: P, password_opt: Option<&[u8]>, bootload
     }
 
     let ctime = SystemTime::now().duration_since(UNIX_EPOCH)?;
-    let fs = FileSystem::create_reserved(
+    let fs = FileSystem::create(
         disk,
         password_opt,
-        bootloader,
         ctime.as_secs(),
         ctime.subsec_nanos()
     ).map_err(syscall_error)?;
@@ -345,6 +348,174 @@ pub fn with_redoxfs<P, T, F>(disk_path: P, password_opt: Option<&[u8]>, bootload
     res
 }
 
+pub fn fetch_bootloaders<S: AsRef<str>>(cookbook: Option<S>) -> Result<(Vec<u8>, Vec<u8>)> {
+    //TODO: make it safe to run this concurrently
+    let bootloader_dir = "/tmp/redox_installer_bootloader";
+    if Path::new(bootloader_dir).exists() {
+        fs::remove_dir_all(&bootloader_dir)?;
+    }
+
+    fs::create_dir(bootloader_dir)?;
+
+    let mut bootloader_config = Config::default();
+    bootloader_config.packages.insert("bootloader".to_string(), PackageConfig::default());
+    install_packages(&bootloader_config, bootloader_dir, cookbook.as_ref());
+
+    let bios_path = Path::new(bootloader_dir).join("boot/bootloader.bios");
+    let efi_path = Path::new(bootloader_dir).join("boot/bootloader.efi");
+    Ok((
+        if bios_path.exists() {
+            fs::read(bios_path)?
+        } else {
+            Vec::new()
+        },
+        if efi_path.exists() {
+            fs::read(efi_path)?
+        } else {
+            Vec::new()
+        },
+    ))
+}
+
+//TODO: make bootloaders use Option, dynamically create BIOS and EFI partitions
+pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader_efi: &[u8], password_opt: Option<&[u8]>, callback: F)
+    -> Result<T> where
+        P: AsRef<Path>,
+        F: FnOnce(&Path) -> Result<T>
+{
+    let target = get_target();
+
+    let bootloader_efi_name = match target.as_str() {
+        "aarch64-unknown-redox" => "BOOTAA64.EFI",
+        "x86-unknown-redox" => "BOOTIA32.EFI",
+        "x86_64-unknown-redox" => "BOOTX64.EFI",
+        _ => {
+            return Err(format_err!("target '{}' not supported", target));
+        }
+    };
+
+    // TODO: support other block sizes?
+    let block_size = 512;
+
+    // Write BIOS bootloader to disk, resetting all partitioning
+    let disk_size = {
+        // Open disk
+        let mut disk = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(disk_path.as_ref())?;
+        
+        // Write bootloader data
+        disk.write(&bootloader_bios)?;
+
+        // Get disk size
+        disk.metadata()?.len()
+    };
+
+    // Open disk, mark it as not initialized
+    let mut gpt_disk = gpt::GptConfig::new()
+        .writable(true)
+        .initialized(false)
+        .open(disk_path.as_ref())?;
+
+    // Calculate partition offsets
+    let gpt_reserved = 34 * 512; // GPT always reserves 34 512-byte sectors
+
+    let bios_start = gpt_reserved / block_size;
+    let bios_end = (1024 * 1024 / block_size) - 1; // End at 1 MiB
+
+    let efi_end = ((disk_size - gpt_reserved) / block_size) - 1;
+    let efi_start = efi_end - ((1024 * 1024) / block_size); // 1 MiB from end of disk
+
+    let redoxfs_start = bios_end + 1;
+    let redoxfs_end = efi_start - 1;
+
+    // Add BIOS boot partition
+    let mut partitions = BTreeMap::new();
+    let mut partition_id = 1;
+    partitions.insert(partition_id, gpt::partition::Partition {
+        part_type_guid: gpt::partition_types::BIOS,
+        part_guid: uuid::Uuid::new_v4(),
+        first_lba: bios_start,
+        last_lba: bios_end,
+        flags: 0, // TODO
+        name: "BIOS".to_string(),
+    });
+    partition_id += 1;
+
+    // Add RedoxFS partition
+    partitions.insert(partition_id, gpt::partition::Partition {
+        //TODO: Use REDOX_REDOXFS type (needs GPT crate changes)
+        part_type_guid: gpt::partition_types::LINUX_FS,
+        part_guid: uuid::Uuid::new_v4(),
+        first_lba: redoxfs_start,
+        last_lba: redoxfs_end,
+        flags: 0,
+        name: "REDOX".to_string(),
+    });
+    partition_id += 1;
+
+    // Add EFI boot partition
+    partitions.insert(partition_id, gpt::partition::Partition {
+        part_type_guid: gpt::partition_types::EFI,
+        part_guid: uuid::Uuid::new_v4(),
+        first_lba: efi_start,
+        last_lba: efi_end,
+        flags: 0, // TODO
+        name: "EFI".to_string(),
+    });
+
+    // Initialize GPT table
+    gpt_disk.update_partitions(partitions)?;
+
+    println!("{:#?}", gpt_disk);
+
+    // Write partition layout, returning disk file
+    let mut disk_file = gpt_disk.write()?;
+
+    // Replace MBR tables with protective MBR
+    let mbr_blocks = (disk_size + block_size - 1) / block_size;
+    gpt::mbr::ProtectiveMBR::with_lb_size(mbr_blocks as u32 - 1)
+        .update_conservative(&mut disk_file)?;
+
+    // Format and install EFI partition
+    {
+        let mut disk_efi = fscommon::StreamSlice::new(
+            &mut disk_file,
+            efi_start * block_size,
+            (efi_end + 1) * block_size,
+        )?;
+
+        fatfs::format_volume(&mut disk_efi, fatfs::FormatVolumeOptions::new())?;
+
+        let fs = fatfs::FileSystem::new(disk_efi, fatfs::FsOptions::new())?;
+
+        let root_dir = fs.root_dir();
+        root_dir.create_dir("EFI")?;
+
+        let efi_dir = root_dir.open_dir("EFI")?;
+        efi_dir.create_dir("BOOT")?;
+
+        let boot_dir = efi_dir.open_dir("BOOT")?;
+
+        let mut file = boot_dir.create_file(bootloader_efi_name)?;
+        file.truncate()?;
+        file.write_all(&bootloader_efi)?;
+    }
+
+    // Format and install RedoxFS partition
+    let disk_redoxfs = DiskIo(fscommon::StreamSlice::new(
+        disk_file,
+        redoxfs_start * block_size,
+        (redoxfs_end + 1) * block_size
+    )?);
+    with_redoxfs(
+        disk_redoxfs,
+        password_opt,
+        callback
+    )
+}
+
 pub fn install<P, S>(config: Config, output: P, cookbook: Option<S>)
     -> Result<()> where
         P: AsRef<Path>,
@@ -355,31 +526,11 @@ pub fn install<P, S>(config: Config, output: P, cookbook: Option<S>)
     if output.as_ref().is_dir() {
         install_dir(config, output, cookbook)
     } else {
-        let bootloader = {
-            //TODO: make it safe to
-            let bootloader_dir = "/tmp/redox_installer_bootloader";
-            if Path::new(bootloader_dir).exists() {
-                fs::remove_dir_all(&bootloader_dir)?;
+        let (bootloader_bios, bootloader_efi) = fetch_bootloaders(cookbook.as_ref())?;
+        with_whole_disk(output, &bootloader_bios, &bootloader_efi, None,
+            move |mount_path| {
+                install_dir(config, mount_path, cookbook)
             }
-
-            fs::create_dir(bootloader_dir)?;
-
-            let mut bootloader_config = Config::default();
-            bootloader_config.packages.insert("bootloader".to_string(), PackageConfig::default());
-            install_packages(&bootloader_config, bootloader_dir, cookbook.as_ref());
-
-            let mut bootloader = fs::read(Path::new(bootloader_dir).join("bootloader"))?;
-
-            // Pad to 1 MiB
-            while bootloader.len() < 1024 * 1024 {
-                bootloader.push(0);
-            }
-
-            bootloader
-        };
-
-        with_redoxfs(output, None, &bootloader, move |mount_path| -> Result<()> {
-            install_dir(config, mount_path, cookbook.as_ref())
-        })
+        )
     }
 }
