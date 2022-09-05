@@ -14,10 +14,11 @@ fn main() {
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
 
-    let mut parser = ArgParser::new(3)
+    let mut parser = ArgParser::new(4)
         .add_opt("b", "cookbook")
         .add_opt("c", "config")
-        .add_flag(&["l", "list-packages"]);
+        .add_flag(&["l", "list-packages"])
+        .add_flag(&["live"]);
     parser.parse(env::args());
 
     let config = if let Some(path) = parser.get_opt("config") {
@@ -68,7 +69,7 @@ fn main() {
         }
     } else {
         if let Some(path) = parser.args.get(0) {
-            if let Err(err) = redox_installer::install(config, path, cookbook) {
+            if let Err(err) = redox_installer::install(config, path, cookbook, parser.found("live")) {
                 writeln!(stderr, "installer: failed to install: {}", err).unwrap();
                 process::exit(1);
             }

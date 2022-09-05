@@ -525,7 +525,7 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
     )
 }
 
-pub fn install<P, S>(config: Config, output: P, cookbook: Option<S>)
+pub fn install<P, S>(config: Config, output: P, cookbook: Option<S>, live: bool)
     -> Result<()> where
         P: AsRef<Path>,
         S: AsRef<str>,
@@ -535,7 +535,7 @@ pub fn install<P, S>(config: Config, output: P, cookbook: Option<S>)
     if output.as_ref().is_dir() {
         install_dir(config, output, cookbook)
     } else {
-        let (bootloader_bios, bootloader_efi) = fetch_bootloaders(cookbook.as_ref(), false)?;
+        let (bootloader_bios, bootloader_efi) = fetch_bootloaders(cookbook.as_ref(), live)?;
         with_whole_disk(output, &bootloader_bios, &bootloader_efi, None,
             move |mount_path| {
                 install_dir(config, mount_path, cookbook)
