@@ -348,7 +348,7 @@ pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F)
     res
 }
 
-pub fn fetch_bootloaders<S: AsRef<str>>(cookbook: Option<S>) -> Result<(Vec<u8>, Vec<u8>)> {
+pub fn fetch_bootloaders<S: AsRef<str>>(cookbook: Option<S>, live: bool) -> Result<(Vec<u8>, Vec<u8>)> {
     //TODO: make it safe to run this concurrently
     let bootloader_dir = "/tmp/redox_installer_bootloader";
     if Path::new(bootloader_dir).exists() {
@@ -361,8 +361,17 @@ pub fn fetch_bootloaders<S: AsRef<str>>(cookbook: Option<S>) -> Result<(Vec<u8>,
     bootloader_config.packages.insert("bootloader".to_string(), PackageConfig::default());
     install_packages(&bootloader_config, bootloader_dir, cookbook.as_ref());
 
-    let bios_path = Path::new(bootloader_dir).join("boot/bootloader.bios");
-    let efi_path = Path::new(bootloader_dir).join("boot/bootloader.efi");
+    let boot_dir = Path::new(bootloader_dir).join("boot");
+    let bios_path = boot_dir.join(if live {
+        "bootloader-live.bios"
+    } else {
+        "bootloader.bios"
+    });
+    let efi_path = boot_dir.join(if live {
+        "bootloader-live.efi"
+    } else {
+        "bootloader.efi"
+    });
     Ok((
         if bios_path.exists() {
             fs::read(bios_path)?
@@ -526,7 +535,7 @@ pub fn install<P, S>(config: Config, output: P, cookbook: Option<S>)
     if output.as_ref().is_dir() {
         install_dir(config, output, cookbook)
     } else {
-        let (bootloader_bios, bootloader_efi) = fetch_bootloaders(cookbook.as_ref())?;
+        let (bootloader_bios, bootloader_efi) = fetch_bootloaders(cookbook.as_ref(), false)?;
         with_whole_disk(output, &bootloader_bios, &bootloader_efi, None,
             move |mount_path| {
                 install_dir(config, mount_path, cookbook)
