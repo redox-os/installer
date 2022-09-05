@@ -396,7 +396,7 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
 
     let bootloader_efi_name = match target.as_str() {
         "aarch64-unknown-redox" => "BOOTAA64.EFI",
-        "x86-unknown-redox" => "BOOTIA32.EFI",
+        "i686-unknown-redox" => "BOOTIA32.EFI",
         "x86_64-unknown-redox" => "BOOTX64.EFI",
         _ => {
             return Err(format_err!("target '{}' not supported", target));
