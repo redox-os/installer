@@ -14,8 +14,8 @@ extern crate termion;
 mod config;
 
 pub use config::Config;
-use config::file::FileConfig;
-use config::package::PackageConfig;
+pub use config::file::FileConfig;
+pub use config::package::PackageConfig;
 
 use failure::{Error, err_msg};
 use rand::{RngCore, rngs::OsRng};
