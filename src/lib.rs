@@ -408,12 +408,14 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
 
     // Write BIOS bootloader to disk, resetting all partitioning
     let disk_size = {
+        eprintln!("Writing bootloader with size {:#x}", bootloader_bios.len());
+
         // Open disk
         let mut disk = fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open(disk_path.as_ref())?;
-        
+
         // Write bootloader data
         disk.write(&bootloader_bios)?;
 
@@ -477,14 +479,15 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
     // Initialize GPT table
     gpt_disk.update_partitions(partitions)?;
 
-    println!("{:#?}", gpt_disk);
+    eprintln!("Writing GPT tables: {:#?}", gpt_disk);
 
     // Write partition layout, returning disk file
     let mut disk_file = gpt_disk.write()?;
 
     // Replace MBR tables with protective MBR
-    let mbr_blocks = (disk_size + block_size - 1) / block_size;
-    gpt::mbr::ProtectiveMBR::with_lb_size(mbr_blocks as u32 - 1)
+    let mbr_blocks = ((disk_size + block_size - 1) / block_size) - 1;
+    eprintln!("Writing protective MBR with disk blocks {:#x}", mbr_blocks);
+    gpt::mbr::ProtectiveMBR::with_lb_size(mbr_blocks as u32)
         .update_conservative(&mut disk_file)?;
 
     // Format and install EFI partition
@@ -495,24 +498,29 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
             (efi_end + 1) * block_size,
         )?;
 
+        eprintln!("Formatting EFI partition with size {:#x}", (efi_end - efi_start) * block_size);
         fatfs::format_volume(&mut disk_efi, fatfs::FormatVolumeOptions::new())?;
 
+        eprintln!("Opening EFI partition");
         let fs = fatfs::FileSystem::new(disk_efi, fatfs::FsOptions::new())?;
 
+        eprintln!("Creating EFI directory");
         let root_dir = fs.root_dir();
         root_dir.create_dir("EFI")?;
 
+        eprintln!("Creating EFI/BOOT directory");
         let efi_dir = root_dir.open_dir("EFI")?;
         efi_dir.create_dir("BOOT")?;
 
+        eprintln!("Writing EFI/BOOT/{} file", bootloader_efi_name);
         let boot_dir = efi_dir.open_dir("BOOT")?;
-
         let mut file = boot_dir.create_file(bootloader_efi_name)?;
         file.truncate()?;
         file.write_all(&bootloader_efi)?;
     }
 
     // Format and install RedoxFS partition
+    eprintln!("Installing to RedoxFS partition with size {:#x}", (redoxfs_end - redoxfs_start) * block_size);
     let disk_redoxfs = DiskIo(fscommon::StreamSlice::new(
         disk_file,
         redoxfs_start * block_size,
