@@ -27,7 +27,8 @@ use std::{
     collections::BTreeMap,
     env,
     fs,
-    io::{self, stderr, Write},
+    io::{self, stderr, Read, Seek, SeekFrom, Write},
+    os::unix::fs::MetadataExt,
     path::Path,
     process::{self, Command},
     str::FromStr,
@@ -403,120 +404,152 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
         }
     };
 
-    // TODO: support other block sizes?
-    let block_size = 512;
-
-    // Write BIOS bootloader to disk, resetting all partitioning
-    let disk_size = {
-        eprintln!("Writing bootloader with size {:#x}", bootloader_bios.len());
-
-        // Open disk
-        let mut disk = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(disk_path.as_ref())?;
-
-        // Write bootloader data
-        disk.write(&bootloader_bios)?;
-
-        // Get disk size
-        disk.metadata()?.len()
-    };
-
-    // Open disk, mark it as not initialized
-    let mut gpt_disk = gpt::GptConfig::new()
-        .writable(true)
-        .initialized(false)
+    // Open disk and read metadata
+    eprintln!("Opening disk {}", disk_path.as_ref().display());
+    let mut disk_file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
         .open(disk_path.as_ref())?;
+    let disk_metadata = disk_file.metadata()?;
+    let disk_size = disk_metadata.len();
+    let block_size = disk_metadata.blksize();
+    let gpt_block_size = match block_size {
+        512 => gpt::disk::LogicalBlockSize::Lb512,
+        _ => {
+            // TODO: support (and test) other block sizes
+            return Err(format_err!("block size {} not supported", block_size));
+        }
+    };
 
     // Calculate partition offsets
     let gpt_reserved = 34 * 512; // GPT always reserves 34 512-byte sectors
 
+    // First megabyte of the disk is reserved for BIOS partition, wich includes GPT tables
+    let bios_size = 1024 * 1024;
     let bios_start = gpt_reserved / block_size;
-    let bios_end = (1024 * 1024 / block_size) - 1; // End at 1 MiB
+    let bios_end = (bios_size / block_size) - 1; // End at 1 MiB
 
+    // Last megabyte of the disk is reserved for EFI partition
+    let efi_size = 1024 * 1024;
     let efi_end = ((disk_size - gpt_reserved) / block_size) - 1;
-    let efi_start = efi_end - ((1024 * 1024) / block_size); // 1 MiB from end of disk
+    let efi_start = efi_end - (efi_size / block_size); // 1 MiB from end of disk
 
     let redoxfs_start = bios_end + 1;
     let redoxfs_end = efi_start - 1;
 
-    // Add BIOS boot partition
-    let mut partitions = BTreeMap::new();
-    let mut partition_id = 1;
-    partitions.insert(partition_id, gpt::partition::Partition {
-        part_type_guid: gpt::partition_types::BIOS,
-        part_guid: uuid::Uuid::new_v4(),
-        first_lba: bios_start,
-        last_lba: bios_end,
-        flags: 0, // TODO
-        name: "BIOS".to_string(),
-    });
-    partition_id += 1;
+    // Format and install BIOS partition
+    {
+        let mut bios_partition = {
+            // We write the BIOS partition and partition tables in memory to avoid non block aligned I/O
+            let mut bios_partition = Box::new(io::Cursor::new(vec![0u8; bios_size as usize]));
 
-    // Add RedoxFS partition
-    partitions.insert(partition_id, gpt::partition::Partition {
-        //TODO: Use REDOX_REDOXFS type (needs GPT crate changes)
-        part_type_guid: gpt::partition_types::LINUX_FS,
-        part_guid: uuid::Uuid::new_v4(),
-        first_lba: redoxfs_start,
-        last_lba: redoxfs_end,
-        flags: 0,
-        name: "REDOX".to_string(),
-    });
-    partition_id += 1;
+            // Write BIOS bootloader to disk
+            eprintln!("Write bootloader with size {:#x}", bootloader_bios.len());
+            bios_partition.write_all(&bootloader_bios)?;
 
-    // Add EFI boot partition
-    partitions.insert(partition_id, gpt::partition::Partition {
-        part_type_guid: gpt::partition_types::EFI,
-        part_guid: uuid::Uuid::new_v4(),
-        first_lba: efi_start,
-        last_lba: efi_end,
-        flags: 0, // TODO
-        name: "EFI".to_string(),
-    });
+            // Replace MBR tables with protective MBR
+            let mbr_blocks = ((disk_size + block_size - 1) / block_size) - 1;
+            eprintln!("Writing protective MBR with disk blocks {:#x}", mbr_blocks);
+            gpt::mbr::ProtectiveMBR::with_lb_size(mbr_blocks as u32)
+                .update_conservative(&mut bios_partition)?;
 
-    // Initialize GPT table
-    gpt_disk.update_partitions(partitions)?;
+            // Open disk, mark it as not initialized
+            let mut gpt_disk = gpt::GptConfig::new()
+                .initialized(false)
+                .writable(true)
+                .logical_block_size(gpt_block_size)
+                .create_from_device(bios_partition, None)?;
 
-    eprintln!("Writing GPT tables: {:#?}", gpt_disk);
+            // Add BIOS boot partition
+            let mut partitions = BTreeMap::new();
+            let mut partition_id = 1;
+            partitions.insert(partition_id, gpt::partition::Partition {
+                part_type_guid: gpt::partition_types::BIOS,
+                part_guid: uuid::Uuid::new_v4(),
+                first_lba: bios_start,
+                last_lba: bios_end,
+                flags: 0, // TODO
+                name: "BIOS".to_string(),
+            });
+            partition_id += 1;
 
-    // Write partition layout, returning disk file
-    let mut disk_file = gpt_disk.write()?;
+            // Add RedoxFS partition
+            partitions.insert(partition_id, gpt::partition::Partition {
+                //TODO: Use REDOX_REDOXFS type (needs GPT crate changes)
+                part_type_guid: gpt::partition_types::LINUX_FS,
+                part_guid: uuid::Uuid::new_v4(),
+                first_lba: redoxfs_start,
+                last_lba: redoxfs_end,
+                flags: 0,
+                name: "REDOX".to_string(),
+            });
+            partition_id += 1;
 
-    // Replace MBR tables with protective MBR
-    let mbr_blocks = ((disk_size + block_size - 1) / block_size) - 1;
-    eprintln!("Writing protective MBR with disk blocks {:#x}", mbr_blocks);
-    gpt::mbr::ProtectiveMBR::with_lb_size(mbr_blocks as u32)
-        .update_conservative(&mut disk_file)?;
+            // Add EFI boot partition
+            partitions.insert(partition_id, gpt::partition::Partition {
+                part_type_guid: gpt::partition_types::EFI,
+                part_guid: uuid::Uuid::new_v4(),
+                first_lba: efi_start,
+                last_lba: efi_end,
+                flags: 0, // TODO
+                name: "EFI".to_string(),
+            });
+
+            eprintln!("Writing GPT tables: {:#?}", partitions);
+
+            // Initialize GPT table
+            gpt_disk.update_partitions(partitions)?;
+
+            // Write partition layout, returning disk file
+            gpt_disk.write()?
+        };
+
+        eprintln!("Copying BIOS partition to disk with size {:#x}", bios_size);
+        for block in 0..bios_size / block_size {
+            let offset = block * block_size;
+            let mut block = vec![0; block_size as usize];
+
+            bios_partition.seek(SeekFrom::Start(offset))?;
+            bios_partition.read_exact(&mut block)?;
+
+            disk_file.seek(SeekFrom::Start(offset))?;
+            disk_file.write_all(&block)?;
+        }
+    }
 
     // Format and install EFI partition
     {
+        // We write the BIOS partition and partition tables in memory to avoid non block aligned I/O
+        let mut efi_partition = vec![0u8; efi_size as usize];
+        {
+            eprintln!("Formatting EFI partition with size {:#x}", efi_size);
+            fatfs::format_volume(io::Cursor::new(&mut efi_partition), fatfs::FormatVolumeOptions::new())?;
+
+            eprintln!("Opening EFI partition");
+            let fs = fatfs::FileSystem::new(io::Cursor::new(&mut efi_partition), fatfs::FsOptions::new())?;
+
+            eprintln!("Creating EFI directory");
+            let root_dir = fs.root_dir();
+            root_dir.create_dir("EFI")?;
+
+            eprintln!("Creating EFI/BOOT directory");
+            let efi_dir = root_dir.open_dir("EFI")?;
+            efi_dir.create_dir("BOOT")?;
+
+            eprintln!("Writing EFI/BOOT/{} file with size {:#x}", bootloader_efi_name, bootloader_efi.len());
+            let boot_dir = efi_dir.open_dir("BOOT")?;
+            let mut file = boot_dir.create_file(bootloader_efi_name)?;
+            file.truncate()?;
+            file.write_all(&bootloader_efi)?;
+        }
+
+        eprintln!("Copying BIOS partition to disk with size {:#x}", efi_size);
         let mut disk_efi = fscommon::StreamSlice::new(
             &mut disk_file,
             efi_start * block_size,
             (efi_end + 1) * block_size,
         )?;
-
-        eprintln!("Formatting EFI partition with size {:#x}", (efi_end - efi_start) * block_size);
-        fatfs::format_volume(&mut disk_efi, fatfs::FormatVolumeOptions::new())?;
-
-        eprintln!("Opening EFI partition");
-        let fs = fatfs::FileSystem::new(disk_efi, fatfs::FsOptions::new())?;
-
-        eprintln!("Creating EFI directory");
-        let root_dir = fs.root_dir();
-        root_dir.create_dir("EFI")?;
-
-        eprintln!("Creating EFI/BOOT directory");
-        let efi_dir = root_dir.open_dir("EFI")?;
-        efi_dir.create_dir("BOOT")?;
-
-        eprintln!("Writing EFI/BOOT/{} file", bootloader_efi_name);
-        let boot_dir = efi_dir.open_dir("BOOT")?;
-        let mut file = boot_dir.create_file(bootloader_efi_name)?;
-        file.truncate()?;
-        file.write_all(&bootloader_efi)?;
+        disk_efi.write_all(&efi_partition)?;
     }
 
     // Format and install RedoxFS partition

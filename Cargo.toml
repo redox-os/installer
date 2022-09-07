@@ -24,7 +24,7 @@ arg_parser = "0.1.0"
 failure = "0.1.8"
 fatfs = "0.3.0"
 fscommon = "0.1.1"
-gpt = { git = "https://gitlab.redox-os.org/redox-os/gpt" }
+gpt = "3.0.0"
 libc = "0.2.70"
 pkgar = "0.1.9"
 pkgar-core = "0.1.0"
@@ -39,7 +39,7 @@ serde = "1.0.110"
 serde_derive = "1.0.110"
 termion = "1.5.5"
 toml = "0.5.6"
-uuid = { version = "0.7.4", features = ["v4"] }
+uuid = { version = "0.8", features = ["v4"] }
 
 [patch.crates-io]
 ring = { git = "https://gitlab.redox-os.org/redox-os/ring.git", branch = "redox-unix-0.13.5" }
