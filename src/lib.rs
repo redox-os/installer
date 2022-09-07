@@ -520,7 +520,7 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
 
     // Format and install EFI partition
     {
-        // We write the BIOS partition and partition tables in memory to avoid non block aligned I/O
+        // We write the EFI partition and partition tables in memory to avoid non block aligned I/O
         let mut efi_partition = vec![0u8; efi_size as usize];
         {
             eprintln!("Formatting EFI partition with size {:#x}", efi_size);
@@ -544,7 +544,7 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
             file.write_all(&bootloader_efi)?;
         }
 
-        eprintln!("Copying BIOS partition to disk with size {:#x}", efi_size);
+        eprintln!("Copying EFI partition to disk with size {:#x}", efi_size);
         let mut disk_efi = fscommon::StreamSlice::new(
             &mut disk_file,
             efi_start * block_size,
