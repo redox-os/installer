@@ -14,6 +14,11 @@ pub struct DiskWrapper {
     seek: u64,
 }
 
+enum Buffer<'a> {
+    Read(&'a mut [u8]),
+    Write(&'a [u8]),
+}
+
 impl DiskWrapper {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let disk = OpenOptions::new()
@@ -40,17 +45,20 @@ impl DiskWrapper {
     pub fn size(&self) -> u64 {
         self.size
     }
-}
 
-impl Read for DiskWrapper {
     //TODO: improve performance by directly using block aligned parts of buf
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+    fn io<'a>(&mut self, buf: &mut Buffer<'a>) -> Result<usize> {
+        let buf_len = match buf {
+            Buffer::Read(read) => read.len(),
+            Buffer::Write(write) => write.len(),
+        };
+
         let mut i = 0;
-        while i < buf.len() {
+        while i < buf_len {
             let block_len: u64 = self.block.len().try_into().unwrap();
             let block = self.seek / block_len;
             let offset: usize = (self.seek % block_len).try_into().unwrap();
-            let remaining = buf.len().checked_sub(i).unwrap();
+            let remaining = buf_len.checked_sub(i).unwrap();
             let len = cmp::min(
                 remaining,
                 self.block.len().checked_sub(offset.try_into().unwrap()).unwrap()
@@ -59,14 +67,33 @@ impl Read for DiskWrapper {
             self.disk.seek(SeekFrom::Start(block.checked_mul(block_len).unwrap()))?;
             self.disk.read_exact(&mut self.block)?;
 
-            buf[i..i.checked_add(len).unwrap()].copy_from_slice(
-                &self.block[offset..offset.checked_add(len).unwrap()]
-            );
+            match buf {
+                Buffer::Read(read) => {
+                    read[i..i.checked_add(len).unwrap()].copy_from_slice(
+                        &self.block[offset..offset.checked_add(len).unwrap()]
+                    );
+                },
+                Buffer::Write(write) => {
+                    self.block[offset..offset.checked_add(len).unwrap()].copy_from_slice(
+                        &write[i..i.checked_add(len).unwrap()]
+                    );
+
+                    self.disk.seek(SeekFrom::Start(block.checked_mul(block_len).unwrap()))?;
+                    self.disk.write_all(&mut self.block)?;
+                }
+            }
 
             i = i.checked_add(len).unwrap();
             self.seek = self.seek.checked_add(len.try_into().unwrap()).unwrap();
         }
+
         Ok(i)
+    }
+}
+
+impl Read for DiskWrapper {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        self.io(&mut Buffer::Read(buf))
     }
 }
 
@@ -90,33 +117,8 @@ impl Seek for DiskWrapper {
 }
 
 impl Write for DiskWrapper {
-    //TODO: improve performance by directly using block aligned parts of buf
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        let mut i = 0;
-        while i < buf.len() {
-            let block_len: u64 = self.block.len().try_into().unwrap();
-            let block = self.seek / block_len;
-            let offset: usize = (self.seek % block_len).try_into().unwrap();
-            let remaining = buf.len().checked_sub(i).unwrap();
-            let len = cmp::min(
-                remaining,
-                self.block.len().checked_sub(offset.try_into().unwrap()).unwrap()
-            );
-
-            self.disk.seek(SeekFrom::Start(block.checked_mul(block_len).unwrap()))?;
-            self.disk.read_exact(&mut self.block)?;
-
-            self.block[offset..offset.checked_add(len).unwrap()].copy_from_slice(
-                &buf[i..i.checked_add(len).unwrap()]
-            );
-
-            self.disk.seek(SeekFrom::Start(block.checked_mul(block_len).unwrap()))?;
-            self.disk.write_all(&mut self.block)?;
-
-            i = i.checked_add(len).unwrap();
-            self.seek = self.seek.checked_add(len.try_into().unwrap()).unwrap();
-        }
-        Ok(i)
+        self.io(&mut Buffer::Write(buf))
     }
 
     fn flush(&mut self) -> Result<()> {
