@@ -412,7 +412,8 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
         .open(disk_path.as_ref())?;
     let disk_metadata = disk_file.metadata()?;
     let disk_size = disk_metadata.len();
-    let block_size = disk_metadata.blksize();
+    // TODO: get real block size: disk_metadata.blksize() works on disks but not image files
+    let block_size = 512;
     let gpt_block_size = match block_size {
         512 => gpt::disk::LogicalBlockSize::Lb512,
         _ => {
