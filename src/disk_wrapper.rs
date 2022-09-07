@@ -46,16 +46,30 @@ impl DiskWrapper {
         self.size
     }
 
-    //TODO: improve performance by directly using block aligned parts of buf
     fn io<'a>(&mut self, buf: &mut Buffer<'a>) -> Result<usize> {
         let buf_len = match buf {
             Buffer::Read(read) => read.len(),
             Buffer::Write(write) => write.len(),
         };
+        let block_len: u64 = self.block.len().try_into().unwrap();
+
+        // Do aligned I/O quickly
+        if self.seek % block_len == 0 && buf_len as u64 % block_len == 0 {
+            self.disk.seek(SeekFrom::Start(self.seek))?;
+            match buf {
+                Buffer::Read(read) => {
+                    self.disk.read_exact(read)?;
+                    return Ok(read.len());
+                },
+                Buffer::Write(write) => {
+                    self.disk.write_all(write)?;
+                    return Ok(write.len());
+                }
+            }
+        }
 
         let mut i = 0;
         while i < buf_len {
-            let block_len: u64 = self.block.len().try_into().unwrap();
             let block = self.seek / block_len;
             let offset: usize = (self.seek % block_len).try_into().unwrap();
             let remaining = buf_len.checked_sub(i).unwrap();
