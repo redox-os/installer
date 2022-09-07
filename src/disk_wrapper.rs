@@ -57,15 +57,11 @@ impl DiskWrapper {
         if self.seek % block_len == 0 && buf_len as u64 % block_len == 0 {
             self.disk.seek(SeekFrom::Start(self.seek))?;
             match buf {
-                Buffer::Read(read) => {
-                    self.disk.read_exact(read)?;
-                    return Ok(read.len());
-                },
-                Buffer::Write(write) => {
-                    self.disk.write_all(write)?;
-                    return Ok(write.len());
-                }
+                Buffer::Read(read) => self.disk.read_exact(read)?,
+                Buffer::Write(write) => self.disk.write_all(write)?,
             }
+            self.seek = self.seek.checked_add(buf_len.try_into().unwrap()).unwrap();
+            return Ok(buf_len);
         }
 
         let mut i = 0;
