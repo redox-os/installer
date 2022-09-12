@@ -58,36 +58,36 @@ fn main() {
         ..Default::default()
     });
 
-    let cookbook = if let Some(path) = parser.get_opt("cookbook") {
-        if ! Path::new(&path).is_dir() {
-            writeln!(stderr, "installer: {}: cookbook not found", path).unwrap();
-            process::exit(1);
-        }
-
-        // Add cookbook key to config
-        let key_path = Path::new(&path).join("build/id_ed25519.pub.toml");
-        match fs::read_to_string(&key_path) {
-            Ok(data) => config.files.push(redox_installer::FileConfig {
-                path: "pkg/id_ed25519.pub.toml".to_string(),
-                data: data,
-                ..Default::default()
-            }),
-            Err(err) => {
-                writeln!(stderr, "installer: {}: failed to read cookbook key: {}", key_path.display(), err).unwrap();
-                process::exit(1);
-            }
-        }
-
-        Some(path)
-    } else {
-        None
-    };
-
     if parser.found("list-packages") {
         for (packagename, _package) in &config.packages {
             println!("{}", packagename);
         }
     } else {
+        let cookbook = if let Some(path) = parser.get_opt("cookbook") {
+            if ! Path::new(&path).is_dir() {
+                writeln!(stderr, "installer: {}: cookbook not found", path).unwrap();
+                process::exit(1);
+            }
+
+            // Add cookbook key to config
+            let key_path = Path::new(&path).join("build/id_ed25519.pub.toml");
+            match fs::read_to_string(&key_path) {
+                Ok(data) => config.files.push(redox_installer::FileConfig {
+                    path: "pkg/id_ed25519.pub.toml".to_string(),
+                    data: data,
+                    ..Default::default()
+                }),
+                Err(err) => {
+                    writeln!(stderr, "installer: {}: failed to read cookbook key: {}", key_path.display(), err).unwrap();
+                    process::exit(1);
+                }
+            }
+
+            Some(path)
+        } else {
+            None
+        };
+
         if let Some(path) = parser.args.get(0) {
             if let Err(err) = redox_installer::install(config, path, cookbook, parser.found("live")) {
                 writeln!(stderr, "installer: failed to install: {}", err).unwrap();
