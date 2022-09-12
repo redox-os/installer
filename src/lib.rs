@@ -111,19 +111,6 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
     repo.add_remote(REMOTE);
 
     if let Some(cookbook) = cookbook {
-        let status = Command::new("./repo.sh")
-            .current_dir(cookbook.as_ref())
-            .args(config.packages.keys())
-            .spawn()
-            .unwrap()
-            .wait()
-            .unwrap();
-
-        if !status.success() {
-            write!(stderr(), "./repo.sh failed.").unwrap();
-            process::exit(1);
-        }
-
         let dest_pkg = format!("{}/pkg", dest);
         if ! Path::new(&dest_pkg).exists() {
             fs::create_dir(&dest_pkg).unwrap();
