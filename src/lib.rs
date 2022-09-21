@@ -417,7 +417,7 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
     // Last megabyte of the disk is reserved for EFI partition
     let efi_size = 1024 * 1024;
     let efi_end = ((disk_size - gpt_reserved) / block_size) - 1;
-    let efi_start = efi_end - (efi_size / block_size); // 1 MiB from end of disk
+    let efi_start = (disk_size - efi_size) / block_size; // 1 MiB from end of disk
 
     let redoxfs_start = bios_end + 1;
     let redoxfs_end = efi_start - 1;
