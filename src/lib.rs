@@ -408,19 +408,19 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
 
     // Calculate partition offsets
     let gpt_reserved = 34 * 512; // GPT always reserves 34 512-byte sectors
+    let mibi = 1024 * 1024;
 
     // First megabyte of the disk is reserved for BIOS partition, wich includes GPT tables
-    let bios_size = 1024 * 1024;
     let bios_start = gpt_reserved / block_size;
-    let bios_end = (bios_size / block_size) - 1; // End at 1 MiB
+    let bios_end = (mibi / block_size) - 1;
 
-    // Last megabyte of the disk is reserved for EFI partition
-    let efi_size = 1024 * 1024;
-    let efi_end = ((disk_size - gpt_reserved) / block_size) - 1;
-    let efi_start = (disk_size - efi_size) / block_size; // 1 MiB from end of disk
+    // Second megabyte of the disk is reserved for EFI partition
+    let efi_start = bios_end + 1;
+    let efi_end = efi_start + (mibi / block_size) - 1;
 
-    let redoxfs_start = bios_end + 1;
-    let redoxfs_end = efi_start - 1;
+    // The rest of the disk is RedoxFS, reserving the GPT table mirror at the end of disk
+    let redoxfs_start = efi_end + 1;
+    let redoxfs_end = ((((disk_size - gpt_reserved) / mibi) * mibi) / block_size) - 1;
 
     // Format and install BIOS partition
     {
@@ -455,6 +455,17 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
         });
         partition_id += 1;
 
+        // Add EFI boot partition
+        partitions.insert(partition_id, gpt::partition::Partition {
+            part_type_guid: gpt::partition_types::EFI,
+            part_guid: uuid::Uuid::new_v4(),
+            first_lba: efi_start,
+            last_lba: efi_end,
+            flags: 0, // TODO
+            name: "EFI".to_string(),
+        });
+        partition_id += 1;
+
         // Add RedoxFS partition
         partitions.insert(partition_id, gpt::partition::Partition {
             //TODO: Use REDOX_REDOXFS type (needs GPT crate changes)
@@ -464,17 +475,6 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
             last_lba: redoxfs_end,
             flags: 0,
             name: "REDOX".to_string(),
-        });
-        partition_id += 1;
-
-        // Add EFI boot partition
-        partitions.insert(partition_id, gpt::partition::Partition {
-            part_type_guid: gpt::partition_types::EFI,
-            part_guid: uuid::Uuid::new_v4(),
-            first_lba: efi_start,
-            last_lba: efi_end,
-            flags: 0, // TODO
-            name: "EFI".to_string(),
         });
 
         eprintln!("Writing GPT tables: {:#?}", partitions);
@@ -488,13 +488,15 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
 
     // Format and install EFI partition
     {
+        let disk_efi_start = efi_start * block_size;
+        let disk_efi_end = (efi_end + 1) * block_size;
         let mut disk_efi = fscommon::StreamSlice::new(
             &mut disk_file,
-            efi_start * block_size,
-            (efi_end + 1) * block_size,
+            disk_efi_start,
+            disk_efi_end,
         )?;
 
-        eprintln!("Formatting EFI partition with size {:#x}", efi_size);
+        eprintln!("Formatting EFI partition with size {:#x}", disk_efi_end - disk_efi_start);
         fatfs::format_volume(&mut disk_efi, fatfs::FormatVolumeOptions::new())?;
 
         eprintln!("Opening EFI partition");
