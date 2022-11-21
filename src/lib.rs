@@ -219,7 +219,8 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
             directory: true,
             mode: Some(0o0700),
             uid: Some(uid),
-            gid: Some(gid)
+            gid: Some(gid),
+            recursive_chown: true,
         }.create(&output_dir)?;
 
         let password = hash_password(&password)?;
@@ -237,7 +238,8 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
             // Take defaults
             mode: None,
             uid: None,
-            gid: None
+            gid: None,
+            recursive_chown: false,
         }.create(&output_dir)?;
     }
 
@@ -249,7 +251,8 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
             directory: false,
             mode: Some(0o0600),
             uid: Some(0),
-            gid: Some(0)
+            gid: Some(0),
+            recursive_chown: false,
         }.create(&output_dir)?;
     }
 

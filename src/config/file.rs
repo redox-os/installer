@@ -1,6 +1,6 @@
 
 use Result;
-use libc::{chown, gid_t, uid_t};
+use libc::{gid_t, uid_t};
 
 use std::io::{Error, Write};
 use std::ffi::{CString, OsStr};
@@ -10,6 +10,24 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 
 //type Result<T> = std::result::Result<T, Error>;
+
+fn chown<P: AsRef<Path>>(path: P, uid: uid_t, gid: gid_t, recursive: bool) -> Result<()> {
+    let path = path.as_ref();
+
+    let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+    if unsafe { libc::chown(c_path.as_ptr(), uid, gid) } != 0 {
+        return Err(Error::last_os_error().into());
+    }
+
+    if recursive && path.is_dir() {
+        for entry_res in fs::read_dir(path)? {
+            let entry = entry_res?;
+            chown(entry.path(), uid, gid, recursive)?;
+        }
+    }
+
+    Ok(())
+}
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct FileConfig {
@@ -21,12 +39,13 @@ pub struct FileConfig {
     pub directory: bool,
     pub mode: Option<u32>,
     pub uid: Option<u32>,
-    pub gid: Option<u32>
+    pub gid: Option<u32>,
+    #[serde(default)]
+    pub recursive_chown: bool,
 }
 
 // TODO: Rewrite impls
 impl FileConfig {
-
     pub(crate) fn create<P: AsRef<Path>>(self, prefix: P) -> Result<()> {
         let path = self.path.trim_start_matches('/');
         let target_file = prefix.as_ref()
@@ -69,15 +88,6 @@ impl FileConfig {
         fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
 
         // chown
-        let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
-        let ret = unsafe {
-            chown(c_path.as_ptr(), uid as uid_t, gid as gid_t)
-        };
-        // credit to uutils
-        if ret == 0 {
-            Ok(())
-        } else {
-            Err(Error::last_os_error().into())
-        }
+        chown(path, uid, gid, self.recursive_chown)
     }
 }
