@@ -1,0 +1,20 @@
+[package]
+name = "redox_installer_gui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+failure = "0.1.8"
+pkgar = "0.1.9"
+pkgar-core = "0.1.0"
+pkgar-keys = "0.1.0"
+redox_installer = "0.2.12"
+toml = "0.5.6"
+
+[dependencies.iced]
+git = "https://gitlab.redox-os.org/redox-os/iced.git"
+branch = "redox"
+
+[patch.crates-io]
+ring = { git = "https://gitlab.redox-os.org/redox-os/ring.git", branch = "redox-unix-0.13.5" }
+winit = { git = "https://gitlab.redox-os.org/redox-os/winit.git", branch = "master" }
