@@ -304,7 +304,8 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
 
     match res {
         Ok(()) => {
-            //TODO: success message?
+            message!("finished installing, ready to reboot");
+            //TODO: reboot button?
         },
         Err(err) => {
             f(Message::Error(
