@@ -35,6 +35,11 @@ fn disk_paths(paths: &mut Vec<(String, u64)>) {
                 if let Ok(path_str) = path.into_os_string().into_string() {
                     let scheme = path_str.trim_start_matches(':').trim_matches('/');
                     if scheme.starts_with("disk") {
+                        if scheme == "disk/live" {
+                            // Skip live disks
+                            continue;
+                        }
+
                         schemes.push(format!("{}:", scheme));
                     }
                 }
@@ -53,11 +58,18 @@ fn disk_paths(paths: &mut Vec<(String, u64)>) {
             match fs::read_dir(&scheme) {
                 Ok(entries) => for entry_res in entries {
                     if let Ok(entry) = entry_res {
-                        if let Ok(path) = entry.path().into_os_string().into_string() {
-                            if let Ok(metadata) = entry.metadata() {
-                                let size = metadata.len();
-                                if size > 0 {
-                                    paths.push((path, size));
+                        if let Ok(file_name) = entry.file_name().into_string() {
+                            if file_name.contains('p') {
+                                // Skip partitions
+                                continue;
+                            }
+
+                            if let Ok(path) = entry.path().into_os_string().into_string() {
+                                if let Ok(metadata) = entry.metadata() {
+                                    let size = metadata.len();
+                                    if size > 0 {
+                                        paths.push((path, size));
+                                    }
                                 }
                             }
                         }
