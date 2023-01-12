@@ -484,8 +484,7 @@ impl Application for Window {
 
                     //TODO: kill worker thread?
                     let join_handle = std::thread::spawn(move || {
-                        loop {
-                            let (disk_path, password_opt) = command_receiver.recv().unwrap();
+                        while let Ok((disk_path, password_opt)) = command_receiver.recv() {
                             println!("Installing to {:?}", disk_path);
                             install(disk_path, password_opt, |message| {
                                 message_sender.unbounded_send(message).unwrap();
