@@ -3,6 +3,7 @@ use iced::executor;
 use iced::theme;
 use iced::widget::{button, column, horizontal_space, progress_bar, radio, row, text, vertical_space};
 use iced::{Alignment, Application, Command, Element, Length, Settings, Subscription, Theme};
+use iced_winit::window;
 use pkgar::{PackageHead, ext::EntryExt};
 use pkgar_core::PackageSrc;
 use pkgar_keys::PublicKeyFile;
@@ -13,11 +14,13 @@ use std::{
     io::{self, Read, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt, symlink},
     path::Path,
+    sync::Arc,
 };
 
 fn main() -> iced::Result {
     let mut settings = Settings::default();
     settings.window.size = (608, 416);
+    settings.exit_on_close_request = false;
     Window::run(settings)
 }
 
@@ -64,7 +67,6 @@ fn disk_paths() -> Result<Vec<(String, u64)>, String> {
                                 if let Ok(metadata) = entry.metadata() {
                                     let size = metadata.len();
                                     if size > 0 {
-                                        //TODO: check if root redoxfs
                                         paths.push((path, size));
                                     }
                                 }
@@ -205,10 +207,13 @@ fn package_files(root_path: &Path, config: &mut Config, files: &mut Vec<String>)
 }
 
 fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, mut f: F) {
+    let start = std::time::Instant::now();
+
     let mut progress = 0;
 
     macro_rules! message {
         ($($arg:tt)*) => {{
+            eprintln!($($arg)*);
             f(Message::Install(
                 progress,
                 format!($($arg)*)
@@ -218,7 +223,7 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
 
     let root_path = Path::new("file:");
 
-    message!("loading bootloader");
+    message!("Loading bootloader");
     let bootloader_bios = {
         let path = root_path.join("boot").join("bootloader.bios");
         if path.exists() {
@@ -236,7 +241,7 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
         }
     };
 
-    message!("loading bootloader.efi");
+    message!("Loading bootloader.efi");
     let bootloader_efi = {
         let path = root_path.join("boot").join("bootloader.efi");
         if path.exists() {
@@ -254,9 +259,9 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
         }
     };
 
-    message!("formatting disk");
+    message!("Formatting disk");
     let res = with_whole_disk(&disk_path, &bootloader_bios, &bootloader_efi, password_opt.as_ref().map(|x| x.as_bytes()), |mount_path| -> Result<(), failure::Error> {
-        message!("loading filesystem.toml");
+        message!("Loading filesystem.toml");
         let mut config: Config = {
             let path = root_path.join("filesystem.toml");
             match fs::read_to_string(&path) {
@@ -282,7 +287,7 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
         ];
 
         // Copy files from locally installed packages
-        message!("loading package files");
+        message!("Loading package files");
         if let Err(err) = package_files(&root_path, &mut config, &mut files) {
             return Err(format_err!("failed to read package files: {}", err));
         }
@@ -294,14 +299,14 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
         let mut buf = vec![0; 4 * MIB as usize];
         for (i, name) in files.iter().enumerate() {
             progress = (i * 100) / files.len();
-            message!("copy {} [{}/{}]", name, i, files.len());
+            message!("Copy {} [{}/{}]", name, i, files.len());
 
             let src = root_path.join(name);
             let dest = mount_path.join(name);
             copy_file(&src, &dest, &mut buf)?;
         }
 
-        message!("configuring system");
+        message!("Configuring system");
         let cookbook: Option<&'static str> = None;
         redox_installer::install_dir(config, mount_path, cookbook).map_err(|err| {
             io::Error::new(
@@ -311,42 +316,53 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
         })?;
 
         progress = 100;
-        message!("finished installing, unmounting filesystem");
+        message!("Finished installing, unmounting filesystem");
         Ok(())
     });
 
     match res {
         Ok(()) => {
-            message!("finished installing, ready to reboot");
-            //TODO: reboot button?
+            f(Message::Success(
+                format!("Finished installing in {:?}, ready to reboot", start.elapsed())
+            ));
         },
         Err(err) => {
             f(Message::Error(
-                format!("failed to install: {}", err)
+                format!("Failed to install: {}", err)
             ));
         }
     }
 }
 
+#[derive(Debug)]
 enum Page {
     Disk(Option<usize>),
     Install(usize, String),
+    Success(String),
+    Error(String),
+}
+
+#[derive(Clone, Debug)]
+struct Worker {
+    command_sender: std::sync::mpsc::Sender<(String, Option<String>)>,
+    join_handle: Arc<std::thread::JoinHandle<()>>,
+}
+
+#[derive(Clone, Debug)]
+enum Message {
+    Worker(Worker),
+    DiskChoose(usize),
+    DiskConfirm(usize),
+    Install(usize, String),
+    Success(String),
+    Exit,
     Error(String),
 }
 
 struct Window {
     page: Page,
     disk_paths: Vec<(String, u64)>,
-    command_sender_opt: Option<std::sync::mpsc::Sender<(String, Option<String>)>>,
-}
-
-#[derive(Clone, Debug)]
-enum Message {
-    CommandSender(std::sync::mpsc::Sender<(String, Option<String>)>),
-    DiskChoose(usize),
-    DiskConfirm(usize),
-    Install(usize, String),
-    Error(String),
+    worker_opt: Option<Worker>,
 }
 
 impl Application for Window {
@@ -366,7 +382,7 @@ impl Application for Window {
             Self {
                 page,
                 disk_paths,
-                command_sender_opt: None,
+                worker_opt: None,
             },
             Command::none(),
         )
@@ -378,17 +394,17 @@ impl Application for Window {
 
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
-            Message::CommandSender(command_sender) => {
-                self.command_sender_opt = Some(command_sender);
+            Message::Worker(worker) => {
+                self.worker_opt = Some(worker);
             },
             Message::DiskChoose(disk_i) => {
                 self.page = Page::Disk(Some(disk_i));
             },
             Message::DiskConfirm(disk_i) => {
                 match self.disk_paths.get(disk_i) {
-                    Some((disk_path, disk_size)) => match &self.command_sender_opt {
-                        Some(command_sender) => {
-                            match command_sender.send((disk_path.clone(), None)) {
+                    Some((disk_path, _disk_size)) => match &self.worker_opt {
+                        Some(worker) => {
+                            match worker.command_sender.send((disk_path.clone(), None)) {
                                 Ok(()) => self.page = Page::Install(0, format!("Starting install...")),
                                 Err(err) => {
                                     self.page = Page::Error(format!("failed to send command: {}", err));
@@ -407,9 +423,20 @@ impl Application for Window {
             Message::Install(progress, description) => {
                 self.page = Page::Install(progress, description);
             },
+            Message::Success(description) => {
+                self.page = Page::Success(description);
+            },
             Message::Error(err) => {
                 self.page = Page::Error(err);
             },
+            Message::Exit => {
+                if let Some(worker) = self.worker_opt.take() {
+                    drop(worker.command_sender);
+                    let join_handle = Arc::try_unwrap(worker.join_handle).unwrap();
+                    join_handle.join().unwrap();
+                }
+                return window::close(window::Id::MAIN);
+            }
         }
         Command::none()
     }
@@ -431,27 +458,34 @@ impl Application for Window {
                     );
                 }
 
-                widgets.push(vertical_space(Length::Fill).into());
-
-                let mut confirm_button = button("Confirm").style(theme::Button::Destructive);
                 if let Some(disk_i) = *disk_i_opt {
-                    confirm_button = confirm_button.on_press(Message::DiskConfirm(disk_i));
+                    widgets.push(vertical_space(Length::Fill).into());
+                    widgets.push(row![
+                        horizontal_space(Length::Fill),
+                        button("Confirm")
+                            .style(theme::Button::Destructive)
+                            .on_press(Message::DiskConfirm(disk_i)),
+                    ].into());
                 }
-
-                widgets.push(row![
-                    horizontal_space(Length::Fill),
-                    confirm_button,
-                ].into());
             } else {
-                widgets.push(text("Error: no drives found").into());
+                widgets.push(text("No drives found").into());
             },
             Page::Install(progress, description) => {
                 widgets.push(text("Installation progress:").size(24).into());
                 widgets.push(progress_bar(0.0..=100.0, *progress as f32).into());
                 widgets.push(text(description).into());
             },
+            Page::Success(description) => {
+                widgets.push(text("Installation complete!").size(24).into());
+                widgets.push(text(description).into());
+                widgets.push(vertical_space(Length::Fill).into());
+                widgets.push(row![
+                    horizontal_space(Length::Fill),
+                    button("Exit").on_press(Message::Exit),
+                ].into());
+            },
             Page::Error(err) => {
-                widgets.push(text(format!("Error: {}", err)).into());
+                widgets.push(text(format!("{}", err)).into());
             }
         };
 
@@ -467,8 +501,6 @@ impl Application for Window {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        struct Worker;
-
         enum State {
             Ready,
             Waiting(iced::futures::channel::mpsc::UnboundedReceiver<Message>),
@@ -492,7 +524,12 @@ impl Application for Window {
                         }
                     });
 
-                    (Some(Message::CommandSender(command_sender)), State::Waiting(message_receiver))
+                    let worker = Worker {
+                        command_sender,
+                        join_handle: Arc::new(join_handle)
+                    };
+
+                    (Some(Message::Worker(worker)), State::Waiting(message_receiver))
                 },
                 State::Waiting(mut message_receiver) => {
                     use iced::futures::StreamExt;
