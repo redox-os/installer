@@ -29,10 +29,9 @@ use std::{
     collections::BTreeMap,
     env,
     fs,
-    io::{self, stderr, Seek, SeekFrom, Write},
+    io::{self, Seek, SeekFrom, Write},
     path::Path,
-    process::{self, Command},
-    str::FromStr,
+    process::{Command},
     sync::mpsc::channel,
     time::{SystemTime, UNIX_EPOCH},
     thread,
@@ -66,20 +65,6 @@ fn hash_password(password: &str) -> Result<String> {
 
 fn syscall_error(err: syscall::Error) -> io::Error {
     io::Error::from_raw_os_error(err.errno)
-}
-
-fn unwrap_or_prompt<T: FromStr>(option: Option<T>, context: &mut liner::Context, prompt: &str) -> Result<T> {
-    match option {
-        Some(t) => Ok(t),
-        None => {
-            let line = context.read_line(
-                prompt,
-                None,
-                &mut liner::BasicCompleter::new(Vec::<String>::new())
-            )?;
-            T::from_str(&line).map_err(|_err| err_msg("failed to parse input"))
-        }
-    }
 }
 
 /// Returns a password collected from the user (plaintext)
