@@ -101,12 +101,20 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
             fs::create_dir(&dest_pkg).unwrap();
         }
 
-        for (packagename, _package) in &config.packages {
-            println!("Installing package {}", packagename);
+        for (packagename, package) in &config.packages {
             let pkgar_path = format!("{}/{}/repo/{}/{}.pkgar",
                                      env::current_dir().unwrap().to_string_lossy(),
                                      cookbook.as_ref(), target, packagename);
-            if Path::new(&pkgar_path).exists() {
+            let from_remote = match (config.general.cooking, package) {
+                (Some(true), PackageConfig::Empty) => true,
+                (Some(true), PackageConfig::Spec { version: None, git: None, path: None }) => true,
+                _ => false
+            };
+            if from_remote {
+                println!("Installing package from remote: {}", packagename);
+                repo.fetch(&packagename).unwrap().install(dest).unwrap();
+            } else if Path::new(&pkgar_path).exists() {
+                println!("Installing package from local repo: {}", packagename);
                 let public_path = format!("{}/{}/build/id_ed25519.pub.toml",
                                           env::current_dir().unwrap().to_string_lossy(),
                                           cookbook.as_ref());
@@ -115,6 +123,7 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
                 let head_path = format!("{}/{}.pkgar_head", dest_pkg, packagename);
                 pkgar::split(&public_path, &pkgar_path, &head_path, Option::<&str>::None).unwrap();
             } else {
+                println!("Installing package tar.gz from local repo: {}", packagename);
                 let path = format!("{}/{}/repo/{}/{}.tar.gz",
                                    env::current_dir().unwrap().to_string_lossy(),
                                    cookbook.as_ref(), target, packagename);
@@ -123,7 +132,7 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
         }
     } else {
         for (packagename, _package) in &config.packages {
-            println!("Installing package {}", packagename);
+            println!("Installing package from remote: {}", packagename);
             repo.fetch(&packagename).unwrap().install(dest).unwrap();
         }
     }
