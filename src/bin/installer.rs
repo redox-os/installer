@@ -9,6 +9,8 @@ use std::path::Path;
 
 use arg_parser::ArgParser;
 
+use redox_installer::PackageConfig;
+
 fn main() {
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
@@ -16,9 +18,13 @@ fn main() {
     let mut parser = ArgParser::new(4)
         .add_opt("b", "cookbook")
         .add_opt("c", "config")
+        .add_flag(&["cooking"])
         .add_flag(&["l", "list-packages"])
         .add_flag(&["live"]);
     parser.parse(env::args());
+
+    // Allow filesystem config to specify recipe or package, enabling mixed recipe/binary build
+    let cooking = parser.found("cooking");
 
     let mut config_data = String::new();
     let mut config = if let Some(path) = parser.get_opt("config") {
@@ -58,9 +64,27 @@ fn main() {
         ..Default::default()
     });
 
+    // Add command line flags to config, command line takes priority
+    if cooking {
+        config.general.cooking = Some(true);
+    }
+
     if parser.found("list-packages") {
-        for (packagename, _package) in &config.packages {
-            println!("{}", packagename);
+        for (packagename, package) in &config.packages {
+            if config.general.cooking == Some(true) {
+                // Only print the names of packages that are relevant to the cookbook
+                match package {
+                    PackageConfig::Build(rule) if rule == "recipe" => {
+                        println!("{}", packagename);
+                    }
+                    PackageConfig::Build(rule) if rule == "recipe_no_fetch" => {
+                        println!("{}", packagename);
+                    }
+                    _ => {}
+                }
+            } else {
+                println!("{}", packagename);
+            }
         }
     } else {
         let cookbook = if let Some(path) = parser.get_opt("cookbook") {
