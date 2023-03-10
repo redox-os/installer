@@ -334,7 +334,7 @@ pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F)
     res
 }
 
-pub fn fetch_bootloaders<S: AsRef<str>>(cookbook: Option<S>, live: bool) -> Result<(Vec<u8>, Vec<u8>)> {
+pub fn fetch_bootloaders<S: AsRef<str>>(config: &Config, cookbook: Option<S>, live: bool) -> Result<(Vec<u8>, Vec<u8>)> {
     //TODO: make it safe to run this concurrently
     let bootloader_dir = "/tmp/redox_installer_bootloader";
     if Path::new(bootloader_dir).exists() {
@@ -344,6 +344,7 @@ pub fn fetch_bootloaders<S: AsRef<str>>(cookbook: Option<S>, live: bool) -> Resu
     fs::create_dir(bootloader_dir)?;
 
     let mut bootloader_config = Config::default();
+    bootloader_config.general = config.general.clone();
     bootloader_config.packages.insert("bootloader".to_string(), PackageConfig::default());
     install_packages(&bootloader_config, bootloader_dir, cookbook.as_ref());
 
@@ -538,7 +539,7 @@ pub fn install<P, S>(config: Config, output: P, cookbook: Option<S>, live: bool)
     if output.as_ref().is_dir() {
         install_dir(config, output, cookbook)
     } else {
-        let (bootloader_bios, bootloader_efi) = fetch_bootloaders(cookbook.as_ref(), live)?;
+        let (bootloader_bios, bootloader_efi) = fetch_bootloaders(&config, cookbook.as_ref(), live)?;
         with_whole_disk(output, &bootloader_bios, &bootloader_efi, None,
             move |mount_path| {
                 install_dir(config, mount_path, cookbook)
