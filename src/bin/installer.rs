@@ -18,7 +18,7 @@ fn main() {
     let mut parser = ArgParser::new(4)
         .add_opt("b", "cookbook")
         .add_opt("c", "config")
-        .add_flag(&["cooking"])
+        .add_flag(&["p", "cooking"])
         .add_flag(&["l", "list-packages"])
         .add_flag(&["live"]);
     parser.parse(env::args());
@@ -96,18 +96,32 @@ fn main() {
             // Add cookbook key to config
             let key_path = Path::new(&path).join("build/id_ed25519.pub.toml");
             match fs::read_to_string(&key_path) {
-                Ok(data) => config.files.push(redox_installer::FileConfig {
-                    path: "pkg/id_ed25519.pub.toml".to_string(),
-                    data: data,
-                    ..Default::default()
-                }),
+                Ok(data) => {
+                    config.files.push(redox_installer::FileConfig {
+                        path: "pkg/id_ed25519.pub.toml".to_string(),
+                        data: data,
+                        ..Default::default()
+                    });
+                    Some(path)
+                },
                 Err(err) => {
-                    writeln!(stderr, "installer: {}: failed to read cookbook key: {}", key_path.display(), err).unwrap();
-                    process::exit(1);
+                    // if there are no recipes coming from the cookbook, this is not a fatal error
+                    if config.packages.clone().into_iter().any(| (_packagename, package) |
+                        match package {
+                            PackageConfig::Empty => false,
+                            PackageConfig::Spec { version: None, git: None, path: None, } => false,
+                            _ => true,
+                        })
+                    {
+                        writeln!(stderr, "installer: {}: failed to read cookbook key: {}", key_path.display(), err).unwrap();
+                        process::exit(1);
+                    } else {
+                        writeln!(stderr, "installer: {}: (non-fatal) missing cookbook key: {}", key_path.display(), err).unwrap();
+                        None
+                    }
                 }
             }
 
-            Some(path)
         } else {
             None
         };
