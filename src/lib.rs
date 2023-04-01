@@ -21,7 +21,7 @@ use disk_wrapper::DiskWrapper;
 
 use failure::{Error, err_msg};
 use rand::{RngCore, rngs::OsRng};
-use redoxfs::{Disk, DiskIo, FileSystem};
+use redoxfs::{unmount_path, Disk, DiskIo, FileSystem};
 use termion::input::TermRead;
 use pkgutils::{Repo, Package};
 
@@ -31,7 +31,6 @@ use std::{
     fs,
     io::{self, Seek, SeekFrom, Write},
     path::Path,
-    process::{Command},
     sync::mpsc::channel,
     time::{SystemTime, UNIX_EPOCH},
     thread,
@@ -306,28 +305,7 @@ pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F)
         ).into()),
     };
 
-    if cfg!(target_os = "redox") {
-        fs::remove_file(format!(":{}", mount_path))?;
-    } else {
-        let status_res = if cfg!(target_os = "linux") {
-            Command::new("fusermount")
-                .arg("-u")
-                .arg(mount_path)
-                .status()
-        } else {
-            Command::new("umount")
-                .arg(mount_path)
-                .status()
-        };
-
-        let status = status_res?;
-        if ! status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "redoxfs umount failed"
-            ).into());
-        }
-    }
+    unmount_path(mount_path)?;
 
     join_handle.join().unwrap();
 
