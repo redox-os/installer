@@ -1,6 +1,6 @@
 [package]
 name = "redox_installer"
-version = "0.2.12"
+version = "0.2.13"
 description = "A Redox filesystem builder"
 license = "MIT"
 authors = ["Jeremy Soller <jackpot51@gmail.com>"]
@@ -32,8 +32,8 @@ pkgar-keys = "0.1.0"
 rand = "0.8"
 redox_liner = "0.5.1"
 redox_pkgutils = "0.1.6"
-redox_syscall = "0.2.12"
-redoxfs = { git = "https://gitlab.redox-os.org/redox-os/redoxfs.git" }
+redox_syscall = "0.4.0"
+redoxfs = "0.5.8"
 rust-argon2 = "0.8.2"
 serde = "1.0.110"
 serde_derive = "1.0.110"

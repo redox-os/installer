@@ -554,7 +554,7 @@ checksum = "d4029edd3e734da6fe05b6cd7bd2960760a616bd2ddd0d59a0124746d6272af0"
 dependencies = [
  "cfg-if 1.0.0",
  "libc",
- "redox_syscall 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "redox_syscall 0.3.5",
  "windows-sys 0.48.0",
 ]
 
@@ -1100,7 +1100,8 @@ dependencies = [
 [[package]]
 name = "range-tree"
 version = "0.1.0"
-source = "git+https://gitlab.redox-os.org/redox-os/range-tree.git#a1b3720c65cd3388def5f4c7fb32281380c78c0d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "384c2842d4e069d5ccacf5fe1dca4ef8d07a5444329715f0fc3c61813502d4d1"
 
 [[package]]
 name = "rayon"
@@ -1126,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "redox_installer"
-version = "0.2.12"
+version = "0.2.13"
 dependencies = [
  "arg_parser",
  "failure",
@@ -1140,7 +1141,7 @@ dependencies = [
  "rand",
  "redox_liner",
  "redox_pkgutils",
- "redox_syscall 0.2.16",
+ "redox_syscall 0.4.0",
  "redoxfs",
  "rust-argon2",
  "serde",
@@ -1211,8 +1212,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.3.5"
-source = "git+https://gitlab.redox-os.org/redox-os/syscall.git#745e9eb2bc777d635c79fd23047c011c9c6e6165"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ded0bce2d41cc3c57aefa284708ced249a64acb01745dbbe72bd78610bfd644c"
 dependencies = [
  "bitflags 1.3.2",
 ]
@@ -1240,7 +1242,8 @@ dependencies = [
 [[package]]
 name = "redoxfs"
 version = "0.5.8"
-source = "git+https://gitlab.redox-os.org/redox-os/redoxfs.git#cd39b798e3193bc06c3482187690abee2a57e99b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c1effb4750117347c5f64723b80251f7e73cd8863bdaf4116c485944e6111d0"
 dependencies = [
  "aes",
  "argon2",
@@ -1253,7 +1256,7 @@ dependencies = [
  "log 0.4.20",
  "range-tree",
  "redox_simple_endian",
- "redox_syscall 0.3.5 (git+https://gitlab.redox-os.org/redox-os/syscall.git)",
+ "redox_syscall 0.4.0",
  "seahash",
  "termion",
  "time",
