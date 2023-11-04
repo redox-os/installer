@@ -104,9 +104,10 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
             let pkgar_path = format!("{}/{}/repo/{}/{}.pkgar",
                                      env::current_dir().unwrap().to_string_lossy(),
                                      cookbook.as_ref(), target, packagename);
-            let from_remote = match (config.general.cooking, package) {
+            let from_remote = match (config.general.repo_binary, package) {
                 (Some(true), PackageConfig::Empty) => true,
                 (Some(true), PackageConfig::Spec { version: None, git: None, path: None }) => true,
+                (_, PackageConfig::Build(rule)) if rule == "binary" => true,
                 _ => false
             };
             if from_remote {
