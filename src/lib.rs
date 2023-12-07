@@ -38,6 +38,13 @@ use std::{
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
+pub struct DiskOption<'a> {
+    pub bootloader_bios: &'a [u8],
+    pub bootloader_efi: &'a [u8],
+    pub password_opt: Option<&'a [u8]>,
+    pub efi_partition_size: Option<u32>, //MiB
+}
+
 const REMOTE: &'static str = "https://static.redox-os.org/pkg";
 
 fn get_target() -> String {
@@ -353,7 +360,7 @@ pub fn fetch_bootloaders<S: AsRef<str>>(config: &Config, cookbook: Option<S>, li
 }
 
 //TODO: make bootloaders use Option, dynamically create BIOS and EFI partitions
-pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader_efi: &[u8], password_opt: Option<&[u8]>, callback: F)
+pub fn with_whole_disk<P, F, T>(disk_path: P, disk_option: &DiskOption, callback: F)
     -> Result<T> where
         P: AsRef<Path>,
         F: FnOnce(&Path) -> Result<T>
@@ -393,7 +400,8 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
 
     // Second megabyte of the disk is reserved for EFI partition
     let efi_start = bios_end + 1;
-    let efi_end = efi_start + (mibi / block_size) - 1;
+    let efi_size = if let Some(size) = disk_option.efi_partition_size { size as u64 } else { 1 };
+    let efi_end = efi_start + (efi_size * mibi / block_size) - 1;
 
     // The rest of the disk is RedoxFS, reserving the GPT table mirror at the end of disk
     let redoxfs_start = efi_end + 1;
@@ -402,9 +410,9 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
     // Format and install BIOS partition
     {
         // Write BIOS bootloader to disk
-        eprintln!("Write bootloader with size {:#x}", bootloader_bios.len());
+        eprintln!("Write bootloader with size {:#x}", disk_option.bootloader_bios.len());
         disk_file.seek(SeekFrom::Start(0))?;
-        disk_file.write_all(&bootloader_bios)?;
+        disk_file.write_all(&disk_option.bootloader_bios)?;
 
         // Replace MBR tables with protective MBR
         let mbr_blocks = ((disk_size + block_size - 1) / block_size) - 1;
@@ -487,11 +495,11 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
         let efi_dir = root_dir.open_dir("EFI")?;
         efi_dir.create_dir("BOOT")?;
 
-        eprintln!("Writing EFI/BOOT/{} file with size {:#x}", bootloader_efi_name, bootloader_efi.len());
+        eprintln!("Writing EFI/BOOT/{} file with size {:#x}", bootloader_efi_name, disk_option.bootloader_efi.len());
         let boot_dir = efi_dir.open_dir("BOOT")?;
         let mut file = boot_dir.create_file(bootloader_efi_name)?;
         file.truncate()?;
-        file.write_all(&bootloader_efi)?;
+        file.write_all(&disk_option.bootloader_efi)?;
     }
 
     // Format and install RedoxFS partition
@@ -503,7 +511,7 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, bootloader_bios: &[u8], bootloader
     )?);
     with_redoxfs(
         disk_redoxfs,
-        password_opt,
+        disk_option.password_opt,
         callback
     )
 }
@@ -519,7 +527,13 @@ pub fn install<P, S>(config: Config, output: P, cookbook: Option<S>, live: bool)
         install_dir(config, output, cookbook)
     } else {
         let (bootloader_bios, bootloader_efi) = fetch_bootloaders(&config, cookbook.as_ref(), live)?;
-        with_whole_disk(output, &bootloader_bios, &bootloader_efi, None,
+        let disk_option = DiskOption {
+            bootloader_bios: &bootloader_bios,
+            bootloader_efi: &bootloader_efi,
+            password_opt: None,
+            efi_partition_size: config.general.efi_partition_size,
+        };
+        with_whole_disk(output, &disk_option,
             move |mount_path| {
                 install_dir(config, mount_path, cookbook)
             }
