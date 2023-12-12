@@ -1163,7 +1163,7 @@ dependencies = [
 
 [[package]]
 name = "redox_installer"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "arg_parser",
  "failure",
