@@ -7,7 +7,7 @@ use iced_winit::window;
 use pkgar::{PackageHead, ext::EntryExt};
 use pkgar_core::PackageSrc;
 use pkgar_keys::PublicKeyFile;
-use redox_installer::{Config, with_whole_disk};
+use redox_installer::{Config, DiskOption, with_whole_disk};
 use std::{
     ffi::OsStr,
     fs,
@@ -260,7 +260,13 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
     };
 
     message!("Formatting disk");
-    let res = with_whole_disk(&disk_path, &bootloader_bios, &bootloader_efi, password_opt.as_ref().map(|x| x.as_bytes()), |mount_path| -> Result<(), failure::Error> {
+    let disk_option = DiskOption {
+        bootloader_bios: &bootloader_bios,
+        bootloader_efi: &bootloader_efi,
+        password_opt: password_opt.as_ref().map(|x| x.as_bytes()),
+        efi_partition_size: None,
+    };
+    let res = with_whole_disk(&disk_path, &disk_option, |mount_path| -> Result<(), failure::Error> {
         message!("Loading filesystem.toml");
         let mut config: Config = {
             let path = root_path.join("filesystem.toml");
