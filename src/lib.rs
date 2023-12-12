@@ -31,6 +31,7 @@ use std::{
     fs,
     io::{self, Seek, SeekFrom, Write},
     path::Path,
+    process,
     sync::mpsc::channel,
     time::{SystemTime, UNIX_EPOCH},
     thread,
@@ -266,14 +267,14 @@ pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F)
         F: FnOnce(&Path) -> Result<T>
 {
     let mount_path = if cfg!(target_os = "redox") {
-        "file/redox_installer"
+        format!("file/redox_installer_{}", process::id())
     } else {
-        "/tmp/redox_installer"
+        format!("/tmp/redox_installer_{}", process::id())
     };
 
     if cfg!(not(target_os = "redox")) {
-        if ! Path::new(mount_path).exists() {
-            fs::create_dir(mount_path)?;
+        if ! Path::new(&mount_path).exists() {
+            fs::create_dir(&mount_path)?;
         }
     }
 
@@ -286,21 +287,24 @@ pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F)
     ).map_err(syscall_error)?;
 
     let (tx, rx) = channel();
-    let join_handle = thread::spawn(move || {
-        let res = redoxfs::mount(
-            fs,
-            mount_path,
-            |real_path| {
-                tx.send(Ok(real_path.to_owned())).unwrap();
-            }
-        );
-        match res {
-            Ok(()) => (),
-            Err(err) => {
-                tx.send(Err(err)).unwrap();
-            },
-        };
-    });
+    let join_handle = {
+        let mount_path = mount_path.clone();
+        thread::spawn(move || {
+            let res = redoxfs::mount(
+                fs,
+                &mount_path,
+                |real_path| {
+                    tx.send(Ok(real_path.to_owned())).unwrap();
+                }
+            );
+            match res {
+                Ok(()) => (),
+                Err(err) => {
+                    tx.send(Err(err)).unwrap();
+                },
+            };
+        })
+    };
 
     let res = match rx.recv() {
         Ok(ok) => match ok {
@@ -313,7 +317,7 @@ pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F)
         ).into()),
     };
 
-    unmount_path(mount_path)?;
+    unmount_path(&mount_path)?;
 
     join_handle.join().unwrap();
 
