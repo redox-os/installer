@@ -321,6 +321,10 @@ pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F)
 
     join_handle.join().unwrap();
 
+    if cfg!(not(target_os = "redox")) {
+        fs::remove_dir_all(&mount_path)?;
+    }
+
     res
 }
 
