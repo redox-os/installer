@@ -329,20 +329,20 @@ pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F)
 }
 
 pub fn fetch_bootloaders<S: AsRef<str>>(config: &Config, cookbook: Option<S>, live: bool) -> Result<(Vec<u8>, Vec<u8>)> {
-    //TODO: make it safe to run this concurrently
-    let bootloader_dir = "/tmp/redox_installer_bootloader";
-    if Path::new(bootloader_dir).exists() {
+    let bootloader_dir = format!("/tmp/redox_installer_bootloader_{}", process::id());
+
+    if Path::new(&bootloader_dir).exists() {
         fs::remove_dir_all(&bootloader_dir)?;
     }
 
-    fs::create_dir(bootloader_dir)?;
+    fs::create_dir(&bootloader_dir)?;
 
     let mut bootloader_config = Config::default();
     bootloader_config.general = config.general.clone();
     bootloader_config.packages.insert("bootloader".to_string(), PackageConfig::default());
-    install_packages(&bootloader_config, bootloader_dir, cookbook.as_ref());
+    install_packages(&bootloader_config, &bootloader_dir, cookbook.as_ref());
 
-    let boot_dir = Path::new(bootloader_dir).join("boot");
+    let boot_dir = Path::new(&bootloader_dir).join("boot");
     let bios_path = boot_dir.join(if live {
         "bootloader-live.bios"
     } else {
@@ -353,18 +353,21 @@ pub fn fetch_bootloaders<S: AsRef<str>>(config: &Config, cookbook: Option<S>, li
     } else {
         "bootloader.efi"
     });
-    Ok((
-        if bios_path.exists() {
-            fs::read(bios_path)?
-        } else {
-            Vec::new()
-        },
-        if efi_path.exists() {
-            fs::read(efi_path)?
-        } else {
-            Vec::new()
-        },
-    ))
+
+    let bios_data = if bios_path.exists() {
+        fs::read(bios_path)?
+    } else {
+        Vec::new()
+    };
+    let efi_data = if efi_path.exists() {
+        fs::read(efi_path)?
+    } else {
+        Vec::new()
+    };
+
+    fs::remove_dir_all(&bootloader_dir)?;
+
+    Ok((bios_data, efi_data))
 }
 
 //TODO: make bootloaders use Option, dynamically create BIOS and EFI partitions
