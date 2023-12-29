@@ -172,11 +172,11 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
 
     let output_dir = output_dir.to_owned();
 
-    install_packages(&config, output_dir.to_str().unwrap(), cookbook);
-
-    for file in config.files {
+    for file in &config.files {
         file.create(&output_dir)?;
     }
+
+    install_packages(&config, output_dir.to_str().unwrap(), cookbook);
 
     let mut passwd = String::new();
     let mut shadow = String::new();

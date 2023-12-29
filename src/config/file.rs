@@ -46,7 +46,7 @@ pub struct FileConfig {
 
 // TODO: Rewrite impls
 impl FileConfig {
-    pub(crate) fn create<P: AsRef<Path>>(self, prefix: P) -> Result<()> {
+    pub(crate) fn create<P: AsRef<Path>>(&self, prefix: P) -> Result<()> {
         let path = self.path.trim_start_matches('/');
         let target_file = prefix.as_ref()
             .join(path);
