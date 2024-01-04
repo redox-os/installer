@@ -150,7 +150,7 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
     //let mut context = liner::Context::new();
 
     macro_rules! prompt {
-        ($dst:expr, $def:expr, $($arg:tt)*) => (if config.general.prompt {
+        ($dst:expr, $def:expr, $($arg:tt)*) => (if config.general.prompt.unwrap_or(true) {
             Err(io::Error::new(
                 io::ErrorKind::Other,
                 "prompt not currently supported"
@@ -186,7 +186,7 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
         // plaintext
         let password = if let Some(password) = user.password {
             password
-        } else if config.general.prompt {
+        } else if config.general.prompt.unwrap_or(true) {
             prompt_password(
                 &format!("{}: enter password: ", username),
                 &format!("{}: confirm password: ", username))?
