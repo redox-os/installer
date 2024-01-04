@@ -12,6 +12,7 @@ pub mod user;
 pub struct Config {
     #[serde(default)]
     pub include: Vec<PathBuf>,
+    #[serde(default)]
     pub general: general::GeneralConfig,
     #[serde(default)]
     pub packages: BTreeMap<String, package::PackageConfig>,
