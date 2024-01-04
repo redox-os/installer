@@ -5,7 +5,7 @@ pub mod file;
 pub mod package;
 pub mod user;
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Config {
     pub general: general::GeneralConfig,
     #[serde(default)]

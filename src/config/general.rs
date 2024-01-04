@@ -1,4 +1,4 @@
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct GeneralConfig {
     pub prompt: bool,
     // Allow config to specify cookbook recipe or binary package as default

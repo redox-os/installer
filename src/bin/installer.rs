@@ -55,7 +55,7 @@ fn main() {
     // Add filesystem.toml to config
     config.files.push(redox_installer::FileConfig {
         path: "filesystem.toml".to_string(),
-        data: config_data,
+        data: toml::to_string_pretty(&config).unwrap(),
         ..Default::default()
     });
 
