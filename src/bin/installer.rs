@@ -18,6 +18,7 @@ fn main() {
     let mut parser = ArgParser::new(4)
         .add_opt("b", "cookbook")
         .add_opt("c", "config")
+        .add_flag(&["filesystem-size"])
         .add_flag(&["r", "repo-binary"])
         .add_flag(&["l", "list-packages"])
         .add_flag(&["live"]);
@@ -51,7 +52,9 @@ fn main() {
         config.general.repo_binary = Some(true);
     }
 
-    if parser.found("list-packages") {
+    if parser.found("filesystem-size") {
+        println!("{}", config.general.filesystem_size.unwrap_or(0));
+    } else if parser.found("list-packages") {
         // List the packages that should be fetched or built by the cookbook
         for (packagename, package) in &config.packages {
             match package {
