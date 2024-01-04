@@ -3,13 +3,13 @@ extern crate redox_installer;
 extern crate serde;
 extern crate toml;
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::Path;
 use std::{env, fs, io, process};
 
 use arg_parser::ArgParser;
 
-use redox_installer::PackageConfig;
+use redox_installer::{Config, PackageConfig};
 
 fn main() {
     let stderr = io::stderr();
@@ -27,24 +27,11 @@ fn main() {
     // If not set on the command line or the filesystem config, then build packages from source.
     let repo_binary = parser.found("repo-binary");
 
-    let mut config_data = String::new();
     let mut config = if let Some(path) = parser.get_opt("config") {
-        match fs::File::open(&path) {
-            Ok(mut config_file) => match config_file.read_to_string(&mut config_data) {
-                Ok(_) => match toml::from_str(&config_data) {
-                    Ok(config) => config,
-                    Err(err) => {
-                        writeln!(stderr, "installer: {}: failed to decode: {}", path, err).unwrap();
-                        process::exit(1);
-                    }
-                },
-                Err(err) => {
-                    writeln!(stderr, "installer: {}: failed to read: {}", path, err).unwrap();
-                    process::exit(1);
-                }
-            },
+        match Config::from_file(Path::new(&path)) {
+            Ok(config) => config,
             Err(err) => {
-                writeln!(stderr, "installer: {}: failed to open: {}", path, err).unwrap();
+                writeln!(stderr, "installer: {err}").unwrap();
                 process::exit(1);
             }
         }
@@ -55,7 +42,7 @@ fn main() {
     // Add filesystem.toml to config
     config.files.push(redox_installer::FileConfig {
         path: "filesystem.toml".to_string(),
-        data: config_data,
+        data: toml::to_string_pretty(&config).unwrap(),
         ..Default::default()
     });
 

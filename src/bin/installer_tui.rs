@@ -309,24 +309,7 @@ fn main() {
         efi_partition_size: None,
     };
     let res = with_whole_disk(&disk_path, &disk_option, |mount_path| -> Result<(), failure::Error> {
-        let mut config: Config = {
-            let path = root_path.join("filesystem.toml");
-            match fs::read_to_string(&path) {
-                Ok(config_data) => {
-                    match toml::from_str(&config_data) {
-                        Ok(config) => {
-                            config
-                        },
-                        Err(err) => {
-                            return Err(format_err!("{}: failed to decode: {}", path.display(), err));
-                        }
-                    }
-                },
-                Err(err) => {
-                    return Err(format_err!("{}: failed to read: {}", path.display(), err));
-                }
-            }
-        };
+        let mut config: Config = Config::from_file(&root_path.join("filesystem.toml"))?;
 
         // Copy filesystem.toml, which is not packaged
         let mut files = vec![
