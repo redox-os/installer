@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
 
-pub mod general;
 pub mod file;
+pub mod general;
 pub mod package;
 pub mod user;
 
@@ -14,4 +16,21 @@ pub struct Config {
     pub files: Vec<file::FileConfig>,
     #[serde(default)]
     pub users: BTreeMap<String, user::UserConfig>,
+}
+
+impl Config {
+    pub fn from_file(path: &Path) -> Result<Self, failure::Error> {
+        let config = match fs::read_to_string(&path) {
+            Ok(config_data) => match toml::from_str(&config_data) {
+                Ok(config) => config,
+                Err(err) => {
+                    return Err(format_err!("{}: failed to decode: {}", path.display(), err));
+                }
+            },
+            Err(err) => {
+                return Err(format_err!("{}: failed to read: {}", path.display(), err));
+            }
+        };
+        Ok(config)
+    }
 }
