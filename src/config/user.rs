@@ -7,3 +7,10 @@ pub struct UserConfig {
     pub home: Option<String>,
     pub shell: Option<String>,
 }
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct GroupConfig {
+    pub gid: Option<u32>,
+    // FIXME move this to the UserConfig struct as extra_groups
+    pub members: Vec<String>,
+}

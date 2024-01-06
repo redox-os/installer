@@ -20,6 +20,8 @@ pub struct Config {
     pub files: Vec<file::FileConfig>,
     #[serde(default)]
     pub users: BTreeMap<String, user::UserConfig>,
+    #[serde(default)]
+    pub groups: BTreeMap<String, user::GroupConfig>,
 }
 
 impl Config {
@@ -63,6 +65,7 @@ impl Config {
             packages: other_packages,
             files: other_files,
             users: other_users,
+            groups: other_groups,
         } = other;
 
         self.general.merge(other_general);
@@ -75,6 +78,10 @@ impl Config {
 
         for (user, user_config) in other_users {
             self.users.insert(user, user_config);
+        }
+
+        for (group, group_config) in other_groups {
+            self.groups.insert(group, group_config);
         }
     }
 }
