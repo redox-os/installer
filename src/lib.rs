@@ -181,6 +181,9 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
     let mut passwd = String::new();
     let mut shadow = String::new();
     let mut next_uid = 1000;
+    let mut next_gid = 1000;
+
+    let mut groups = vec![];
 
     for (username, user) in config.users {
         // plaintext
@@ -200,7 +203,11 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
             next_uid = uid + 1;
         }
 
-        let gid = user.gid.unwrap_or(uid);
+        let gid = user.gid.unwrap_or(next_gid);
+
+        if gid >= next_gid {
+            next_gid = gid + 1;
+        }
 
         let name = prompt!(user.name, username.clone(), "{}: name (GECOS) [{}]: ", username, username)?;
         let home = prompt!(user.home, format!("/home/{}", username), "{}: home [/home/{}]: ", username, username)?;
@@ -229,6 +236,19 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
 
         passwd.push_str(&format!("{};{};{};{};file:{};file:{}\n", username, uid, gid, name, home, shell));
         shadow.push_str(&format!("{};{}\n", username, password));
+        groups.push((username.clone(), gid, vec![username]));
+    }
+
+    for (group, group_config) in config.groups {
+        // FIXME this assumes there is no overlap between auto-created groups for users
+        // and explicitly specified groups.
+        let gid = group_config.gid.unwrap_or(next_gid);
+
+        if gid >= next_gid {
+            next_gid = gid + 1;
+        }
+
+        groups.push((group, gid, group_config.members));
     }
 
     if !passwd.is_empty() {
@@ -254,6 +274,31 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
             mode: Some(0o0600),
             uid: Some(0),
             gid: Some(0),
+            recursive_chown: false,
+        }.create(&output_dir)?;
+    }
+
+    if !groups.is_empty() {
+        let mut groups_data = String::new();
+
+        for (name, gid, members) in groups {
+            use std::fmt::Write;
+            writeln!(groups_data, "{name};{gid};{}", members.join(",")).unwrap();
+
+            println!("Adding group {}:", name);
+            println!("\tGID: {}", gid);
+            println!("\tMembers: {}", members.join(", "));
+        }
+
+        FileConfig {
+            path: "/etc/group".to_string(),
+            data: groups_data,
+            symlink: false,
+            directory: false,
+            // Take defaults
+            mode: None,
+            uid: None,
+            gid: None,
             recursive_chown: false,
         }.create(&output_dir)?;
     }

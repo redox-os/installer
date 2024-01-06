@@ -54,6 +54,11 @@ home = "/root"
 # Password is unset
 password = ""
 
+# Group settings
+[groups.sudo]
+gid = 1
+members = ["user"]
+
 [[files]]
 path = "/etc/init.d/00_base"
 data = """
@@ -117,14 +122,6 @@ data = """
 [[files]]
 path = "/etc/pkg.d/50_redox"
 data = "https://static.redox-os.org/pkg"
-
-[[files]]
-path = "/etc/group"
-data = """
-root;0;root
-user;1000;user
-sudo;1;user
-"""
 
 [[files]]
 path = "/etc/hostname"
