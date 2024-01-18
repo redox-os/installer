@@ -234,7 +234,7 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
 
         let password = hash_password(&password)?;
 
-        passwd.push_str(&format!("{};{};{};{};file:{};file:{}\n", username, uid, gid, name, home, shell));
+        passwd.push_str(&format!("{};{};{};{};{};{}\n", username, uid, gid, name, home, shell));
         shadow.push_str(&format!("{};{}\n", username, password));
         groups.push((username.clone(), gid, vec![username]));
     }
