@@ -18,6 +18,7 @@ fn main() {
     let mut parser = ArgParser::new(4)
         .add_opt("b", "cookbook")
         .add_opt("c", "config")
+        .add_opt("o", "output-config")
         .add_flag(&["filesystem-size"])
         .add_flag(&["r", "repo-binary"])
         .add_flag(&["l", "list-packages"])
@@ -40,10 +41,19 @@ fn main() {
         redox_installer::Config::default()
     };
 
+    // Get toml of merged config
+    let merged_toml = toml::to_string_pretty(&config).unwrap();
+
+    // Just output merged config and exit
+    if let Some(path) = parser.get_opt("output-config") {
+        fs::write(path, merged_toml).unwrap();
+        return;
+    }
+
     // Add filesystem.toml to config
     config.files.push(redox_installer::FileConfig {
         path: "filesystem.toml".to_string(),
-        data: toml::to_string_pretty(&config).unwrap(),
+        data: merged_toml,
         ..Default::default()
     });
 
