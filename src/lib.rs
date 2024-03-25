@@ -283,7 +283,7 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
 
         for (name, gid, members) in groups {
             use std::fmt::Write;
-            writeln!(groups_data, "{name};{gid};{}", members.join(",")).unwrap();
+            writeln!(groups_data, "{name};x;{gid};{}", members.join(",")).unwrap();
 
             println!("Adding group {}:", name);
             println!("\tGID: {}", gid);
