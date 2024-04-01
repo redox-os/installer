@@ -1259,9 +1259,9 @@ dependencies = [
 
 [[package]]
 name = "redoxfs"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4c189a8eccec864d5b193e3513388b4ae9302193ef5612729a31696bf519a9c"
+checksum = "53fd4a89861ecb0c40d804dd1b686a86896a7ba162ef5cb484ed68e5c5b0837d"
 dependencies = [
  "aes",
  "argon2",
