@@ -11,14 +11,10 @@ pkgar-keys = "0.1.0"
 redox_installer = "0.2.17"
 toml = "0.5.6"
 
-[dependencies.iced]
-git = "https://gitlab.redox-os.org/redox-os/iced.git"
-branch = "redox"
-
-[dependencies.iced_winit]
-git = "https://gitlab.redox-os.org/redox-os/iced.git"
-branch = "redox"
+[dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic.git"
+default-features = false
+features = ["multi-window", "tokio", "winit"]
 
 [patch.crates-io]
 ring = { git = "https://gitlab.redox-os.org/redox-os/ring.git", branch = "redox-unix-0.13.5" }
-winit = { git = "https://gitlab.redox-os.org/redox-os/winit.git", branch = "master" }
