@@ -1,6 +1,6 @@
 [package]
 name = "redox_installer"
-version = "0.2.21"
+version = "0.2.22"
 description = "A Redox filesystem builder"
 license = "MIT"
 authors = ["Jeremy Soller <jackpot51@gmail.com>"]
@@ -21,6 +21,7 @@ path = "src/lib.rs"
 
 [dependencies]
 arg_parser = "0.1.0"
+cc = "=1.0.99" # Hack for ring 0.13.5 not building
 failure = "0.1.8"
 fatfs = "0.3.0"
 fscommon = "0.1.1"
