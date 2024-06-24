@@ -846,7 +846,7 @@ checksum = "c0ff37bd590ca25063e35af745c343cb7a0271906fb7b37e4813e8f79f00268d"
 dependencies = [
  "bitflags 2.5.0",
  "libc",
- "redox_syscall 0.5.1",
+ "redox_syscall 0.5.2",
 ]
 
 [[package]]
@@ -1152,8 +1152,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "436d45c2b6a5b159d43da708e62b25be3a4a3d5550d654b72216ade4c4bfd717"
 
 [[package]]
+name = "redox-scheme"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2148c23b7ed5bf1cc3919b4830e4bf2a674a5d3691c619317624ccd78d13a3ac"
+dependencies = [
+ "libredox 0.1.3",
+ "redox_syscall 0.5.2",
+]
+
+[[package]]
 name = "redox_installer"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "arg_parser",
  "failure",
@@ -1167,7 +1177,7 @@ dependencies = [
  "rand",
  "redox_liner",
  "redox_pkgutils",
- "redox_syscall 0.5.1",
+ "redox_syscall 0.5.2",
  "redoxfs",
  "rust-argon2",
  "serde",
@@ -1233,9 +1243,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "469052894dcb553421e483e4209ee581a45100d31b4018de03e5a7ad86374a7e"
+checksum = "c82cf8cff14456045f55ec4241383baeff27af886adb72ffb2162f99911de0fd"
 dependencies = [
  "bitflags 2.5.0",
 ]
@@ -1259,9 +1269,9 @@ dependencies = [
 
 [[package]]
 name = "redoxfs"
-version = "0.6.4"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45ebd559766fa473d5324f662e23841e32534fd3cabab409e377e59c2e00e82b"
+checksum = "9a71f2d5a3b97f32e8c2c5173186b0481a12745c3c3eaf74a04db7923b5de409"
 dependencies = [
  "aes",
  "argon2",
@@ -1275,7 +1285,8 @@ dependencies = [
  "log 0.4.21",
  "range-tree",
  "redox-path",
- "redox_syscall 0.5.1",
+ "redox-scheme",
+ "redox_syscall 0.5.2",
  "seahash",
  "termion 2.0.3",
  "time",
