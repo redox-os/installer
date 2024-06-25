@@ -312,7 +312,7 @@ pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F)
         F: FnOnce(&Path) -> Result<T>
 {
     let mount_path = if cfg!(target_os = "redox") {
-        format!("file/redox_installer_{}", process::id())
+        format!("file.redox_installer_{}", process::id())
     } else {
         format!("/tmp/redox_installer_{}", process::id())
     };
