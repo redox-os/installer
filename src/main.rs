@@ -107,14 +107,17 @@ fn format_size(size: u64) -> String {
 
 fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<(), failure::Error> {
     if let Some(parent) = dest.parent() {
-        match fs::create_dir_all(&parent) {
-            Ok(()) => (),
-            Err(err) => {
-                return Err(format_err!(
-                    "failed to create directory {}: {}",
-                    parent.display(),
-                    err
-                ));
+        // Parent may be a symlink
+        if ! parent.is_symlink() {
+            match fs::create_dir_all(&parent) {
+                Ok(()) => (),
+                Err(err) => {
+                    return Err(format_err!(
+                        "failed to create directory {}: {}",
+                        parent.display(),
+                        err
+                    ));
+                }
             }
         }
     }
@@ -349,6 +352,13 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
             files.sort();
             files.dedup();
 
+            // Perform config install (after packages have been converted to files)
+            message!("Configuring system");
+            let cookbook: Option<&'static str> = None;
+            redox_installer::install_dir(config, mount_path, cookbook)
+                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+
+            // Install files
             let mut buf = vec![0; 4 * MIB as usize];
             for (i, name) in files.iter().enumerate() {
                 progress = (i * 100) / files.len();
@@ -358,11 +368,6 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
                 let dest = mount_path.join(name);
                 copy_file(&src, &dest, &mut buf)?;
             }
-
-            message!("Configuring system");
-            let cookbook: Option<&'static str> = None;
-            redox_installer::install_dir(config, mount_path, cookbook)
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
 
             progress = 100;
             message!("Finished installing, unmounting filesystem");
