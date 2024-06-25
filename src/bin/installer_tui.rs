@@ -104,10 +104,13 @@ fn format_size(size: u64) -> String {
 
 fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<(), failure::Error> {
     if let Some(parent) = dest.parent() {
-        match fs::create_dir_all(&parent) {
-            Ok(()) => (),
-            Err(err) => {
-                return Err(format_err!("failed to create directory {}: {}", parent.display(), err));
+        // Parent may be a symlink
+        if ! parent.is_symlink() {
+            match fs::create_dir_all(&parent) {
+                Ok(()) => (),
+                Err(err) => {
+                    return Err(format_err!("failed to create directory {}: {}", parent.display(), err));
+                }
             }
         }
     }
@@ -321,10 +324,21 @@ fn main() {
             return Err(format_err!("failed to read package files: {}", err));
         }
 
+        // Perform config install (after packages have been converted to files)
+        eprintln!("configuring system");
+        let cookbook: Option<&'static str> = None;
+        redox_installer::install_dir(config, mount_path, cookbook).map_err(|err| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                err
+            )
+        })?;
+
         // Sort and remove duplicates
         files.sort();
         files.dedup();
 
+        // Install files
         let mut buf = vec![0; 4 * MIB as usize];
         for (i, name) in files.iter().enumerate() {
             eprintln!("copy {} [{}/{}]", name, i, files.len());
@@ -333,16 +347,6 @@ fn main() {
             let dest = mount_path.join(name);
             copy_file(&src, &dest, &mut buf)?;
         }
-
-        eprintln!("finished copying {} files", files.len());
-
-        let cookbook: Option<&'static str> = None;
-        redox_installer::install_dir(config, mount_path, cookbook).map_err(|err| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                err
-            )
-        })?;
 
         eprintln!("finished installing, unmounting filesystem");
 
