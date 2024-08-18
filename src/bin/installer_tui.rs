@@ -28,7 +28,7 @@ fn disk_paths(_paths: &mut Vec<(String, u64)>) {}
 #[cfg(target_os = "redox")]
 fn disk_paths(paths: &mut Vec<(String, u64)>) {
     let mut schemes = Vec::new();
-    match fs::read_dir(":") {
+    match fs::read_dir("/scheme") {
         Ok(entries) => for entry_res in entries {
             if let Ok(entry) = entry_res {
                 let path = entry.path();
@@ -269,7 +269,7 @@ fn choose_password() -> Option<String> {
 }
 
 fn main() {
-    let root_path = Path::new("file:");
+    let root_path = Path::new("/");
 
     let disk_path = choose_disk();
 
