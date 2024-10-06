@@ -79,7 +79,7 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
 }
 
 //TODO: error handling
-fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option<S>) {
+fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
     let target = &get_target();
 
     let mut repo = Repo::new(target);
@@ -93,63 +93,99 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
 
         for (packagename, package) in &config.packages {
             let pkgar_path = format!(
-                "{}/{}/repo/{}/{}.pkgar",
-                env::current_dir().unwrap().to_string_lossy(),
-                cookbook.as_ref(),
-                target,
-                packagename
+                "{cwd}/{cookbook}/repo/{target}/{packagename}.pkgar",
+                cwd = env::current_dir().unwrap().to_string_lossy(),
             );
-            let from_remote = match (config.general.repo_binary, package) {
-                (Some(true), PackageConfig::Empty) => true,
+
+            enum Rule<'a> {
+                RemotePrebuilt,
+                LocalPrebuilt { pkg_path: &'a str },
+                Build,
+            }
+
+            let rule = match (config.general.repo_binary, package) {
                 (
                     Some(true),
-                    PackageConfig::Spec {
+                    PackageConfig::Empty
+                    | PackageConfig::Spec {
                         version: None,
                         git: None,
                         path: None,
+                        pkg_path: None,
                     },
-                ) => true,
-                (_, PackageConfig::Build(rule)) if rule == "binary" => true,
-                _ => false,
-            };
-            if from_remote {
-                println!("Installing package from remote: {}", packagename);
-                repo.fetch(&packagename).unwrap().install(dest).unwrap();
-            } else if Path::new(&pkgar_path).exists() {
-                println!("Installing package from local repo: {}", packagename);
-                let public_path = format!(
-                    "{}/{}/build/id_ed25519.pub.toml",
-                    env::current_dir().unwrap().to_string_lossy(),
-                    cookbook.as_ref()
-                );
-                pkgar::extract(&public_path, &pkgar_path, dest).unwrap();
+                ) => {
+                    // prebuilt
+                    Rule::RemotePrebuilt
+                }
+                (_, PackageConfig::Build(rule)) if rule == "binary" => Rule::RemotePrebuilt,
+                (
+                    _,
+                    PackageConfig::Spec {
+                        pkg_path: Some(pkg_path),
+                        ..
+                    },
+                ) => Rule::LocalPrebuilt {
+                    pkg_path: &*pkg_path,
+                },
 
-                let head_path = format!("{}/{}.pkgar_head", dest_pkg, packagename);
-                pkgar::split(&public_path, &pkgar_path, &head_path, Option::<&str>::None).unwrap();
-            } else {
-                println!("Installing package tar.gz from local repo: {}", packagename);
-                let path = format!(
-                    "{}/{}/repo/{}/{}.tar.gz",
-                    env::current_dir().unwrap().to_string_lossy(),
-                    cookbook.as_ref(),
-                    target,
-                    packagename
-                );
-                Package::from_path(&path).unwrap().install(dest).unwrap();
+                _ => Rule::Build,
+            };
+
+            match rule {
+                Rule::LocalPrebuilt { pkg_path } => {
+                    println!(
+                        "Installing package from local pkgar file: {packagename} <- `{pkg_path}`"
+                    );
+                    Package::from_path(pkg_path).unwrap().install(dest).unwrap();
+                }
+                Rule::RemotePrebuilt => {
+                    println!("Installing package from remote: {packagename}");
+                    repo.fetch(&packagename).unwrap().install(dest).unwrap();
+                }
+                Rule::Build if Path::new(&pkgar_path).exists() => {
+                    println!("Installing package from local repo: {}", packagename);
+                    let public_path = format!(
+                        "{cwd}/{cookbook}/build/id_ed25519.pub.toml",
+                        cwd = env::current_dir().unwrap().to_string_lossy(),
+                    );
+                    pkgar::extract(&public_path, &pkgar_path, dest).unwrap();
+
+                    let head_path = format!("{dest_pkg}/{packagename}.pkgar_head");
+                    pkgar::split(&public_path, &pkgar_path, &head_path, Option::<&str>::None)
+                        .unwrap();
+                }
+                Rule::Build => {
+                    println!("Installing package tar.gz from local repo: {packagename}");
+                    let path = format!(
+                        "{cwd}/{cookbook}/repo/{target}/{packagename}.tar.gz",
+                        cwd = env::current_dir().unwrap().to_string_lossy(),
+                    );
+                    Package::from_path(&path).unwrap().install(dest).unwrap();
+                }
             }
         }
     } else {
-        for (packagename, _package) in &config.packages {
-            println!("Installing package from remote: {}", packagename);
-            repo.fetch(&packagename).unwrap().install(dest).unwrap();
+        for (packagename, package) in &config.packages {
+            let mut package = if let PackageConfig::Spec {
+                pkg_path: Some(override_path),
+                ..
+            } = package
+            {
+                println!("Installing package from local file: {}", packagename);
+                Package::from_path(override_path).unwrap()
+            } else {
+                println!("Installing package from remote: {}", packagename);
+                repo.fetch(&packagename).unwrap()
+            };
+            package.install(dest).unwrap();
         }
     }
 }
 
-pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(
+pub fn install_dir(
     config: Config,
-    output_dir: P,
-    cookbook: Option<S>,
+    output_dir: impl AsRef<Path>,
+    cookbook: Option<&str>,
 ) -> Result<()> {
     //let mut context = liner::Context::new();
 
@@ -237,13 +273,13 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(
             username
         )?;
 
-        println!("Adding user {}:", username);
-        println!("\tPassword: {}", password);
-        println!("\tUID: {}", uid);
-        println!("\tGID: {}", gid);
-        println!("\tName: {}", name);
-        println!("\tHome: {}", home);
-        println!("\tShell: {}", shell);
+        println!("Adding user {username}:");
+        println!("\tPassword: {password}");
+        println!("\tUID: {uid}");
+        println!("\tGID: {gid}");
+        println!("\tName: {name}");
+        println!("\tHome: {home}");
+        println!("\tShell: {shell}");
 
         FileConfig {
             path: home.clone(),
@@ -312,11 +348,8 @@ XDG_VIDEOS_DIR="$HOME/Videos"
 
         let password = hash_password(&password)?;
 
-        passwd.push_str(&format!(
-            "{};{};{};{};{};{}\n",
-            username, uid, gid, name, home, shell
-        ));
-        shadow.push_str(&format!("{};{}\n", username, password));
+        passwd.push_str(&format!("{username};{uid};{gid};{name};{home};{shell}\n",));
+        shadow.push_str(&format!("{username};{password}\n"));
         groups.push((username.clone(), gid, vec![username]));
     }
 
@@ -368,8 +401,8 @@ XDG_VIDEOS_DIR="$HOME/Videos"
             use std::fmt::Write;
             writeln!(groups_data, "{name};x;{gid};{}", members.join(",")).unwrap();
 
-            println!("Adding group {}:", name);
-            println!("\tGID: {}", gid);
+            println!("Adding group {name}:");
+            println!("\tGID: {gid}");
             println!("\tMembers: {}", members.join(", "));
         }
 
@@ -452,9 +485,9 @@ where
     res
 }
 
-pub fn fetch_bootloaders<S: AsRef<str>>(
+pub fn fetch_bootloaders(
     config: &Config,
-    cookbook: Option<S>,
+    cookbook: Option<&str>,
     live: bool,
 ) -> Result<(Vec<u8>, Vec<u8>)> {
     let bootloader_dir = format!("/tmp/redox_installer_bootloader_{}", process::id());
@@ -470,7 +503,7 @@ pub fn fetch_bootloaders<S: AsRef<str>>(
     bootloader_config
         .packages
         .insert("bootloader".to_string(), PackageConfig::default());
-    install_packages(&bootloader_config, &bootloader_dir, cookbook.as_ref());
+    install_packages(&bootloader_config, &bootloader_dir, cookbook);
 
     let boot_dir = Path::new(&bootloader_dir).join("boot");
     let bios_path = boot_dir.join(if live {
@@ -562,8 +595,9 @@ where
         disk_file.write_all(&disk_option.bootloader_bios)?;
 
         // Replace MBR tables with protective MBR
+        // TODO: div_ceil
         let mbr_blocks = ((disk_size + block_size - 1) / block_size) - 1;
-        eprintln!("Writing protective MBR with disk blocks {:#x}", mbr_blocks);
+        eprintln!("Writing protective MBR with disk blocks {mbr_blocks:#x}");
         gpt::mbr::ProtectiveMBR::with_lb_size(mbr_blocks as u32)
             .update_conservative(&mut disk_file)?;
 
@@ -618,7 +652,7 @@ where
             },
         );
 
-        eprintln!("Writing GPT tables: {:#?}", partitions);
+        eprintln!("Writing GPT tables: {partitions:#?}");
 
         // Initialize GPT table
         gpt_disk.update_partitions(partitions)?;
@@ -675,18 +709,13 @@ where
     with_redoxfs(disk_redoxfs, disk_option.password_opt, callback)
 }
 
-pub fn install<P, S>(config: Config, output: P, cookbook: Option<S>, live: bool) -> Result<()>
-where
-    P: AsRef<Path>,
-    S: AsRef<str>,
-{
-    println!("Install {:#?} to {}", config, output.as_ref().display());
+fn install_inner(config: Config, output: &Path, cookbook: Option<&str>, live: bool) -> Result<()> {
+    println!("Install {config:#?} to {}", output.display());
 
-    if output.as_ref().is_dir() {
+    if output.is_dir() {
         install_dir(config, output, cookbook)
     } else {
-        let (bootloader_bios, bootloader_efi) =
-            fetch_bootloaders(&config, cookbook.as_ref(), live)?;
+        let (bootloader_bios, bootloader_efi) = fetch_bootloaders(&config, cookbook, live)?;
         let disk_option = DiskOption {
             bootloader_bios: &bootloader_bios,
             bootloader_efi: &bootloader_efi,
@@ -697,4 +726,12 @@ where
             install_dir(config, mount_path, cookbook)
         })
     }
+}
+pub fn install(
+    config: Config,
+    output: impl AsRef<Path>,
+    cookbook: Option<&str>,
+    live: bool,
+) -> Result<()> {
+    install_inner(config, output.as_ref(), cookbook, live)
 }
