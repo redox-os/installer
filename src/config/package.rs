@@ -7,7 +7,7 @@ pub enum PackageConfig {
         version: Option<String>,
         git: Option<String>,
         path: Option<String>,
-    }
+    },
 }
 
 impl Default for PackageConfig {

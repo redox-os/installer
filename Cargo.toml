@@ -6,6 +6,7 @@ license = "MIT"
 authors = ["Jeremy Soller <jackpot51@gmail.com>"]
 repository = "https://gitlab.redox-os.org/redox-os/installer"
 default-run = "redox_installer"
+edition = "2018"
 
 [[bin]]
 name = "redox_installer"
