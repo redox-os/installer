@@ -1,24 +1,15 @@
-extern crate arg_parser;
-#[macro_use] extern crate failure;
-extern crate pkgar;
-extern crate pkgar_core;
-extern crate pkgar_keys;
-extern crate redox_installer;
-extern crate serde;
-extern crate termion;
-extern crate toml;
-
-use pkgar::{PackageHead, ext::EntryExt};
+use anyhow::{anyhow, bail, Result};
+use pkgar::{ext::EntryExt, PackageHead};
 use pkgar_core::PackageSrc;
 use pkgar_keys::PublicKeyFile;
-use redox_installer::{Config, with_whole_disk, DiskOption};
+use redox_installer::{with_whole_disk, Config, DiskOption};
 use std::{
     ffi::OsStr,
     fs,
     io::{self, Read, Write},
-    os::unix::fs::{MetadataExt, OpenOptionsExt, symlink},
+    os::unix::fs::{symlink, MetadataExt, OpenOptionsExt},
     path::Path,
-    process
+    process,
 };
 use termion::input::TermRead;
 
@@ -29,52 +20,54 @@ fn disk_paths(_paths: &mut Vec<(String, u64)>) {}
 fn disk_paths(paths: &mut Vec<(String, u64)>) {
     let mut schemes = Vec::new();
     match fs::read_dir("/scheme") {
-        Ok(entries) => for entry_res in entries {
-            if let Ok(entry) = entry_res {
-                let path = entry.path();
-                if let Ok(path_str) = path.into_os_string().into_string() {
-                    let scheme = path_str.trim_start_matches(':').trim_matches('/');
-                    if scheme.starts_with("disk") {
-                        if scheme == "disk/live" {
-                            // Skip live disks
-                            continue;
-                        }
+        Ok(entries) => {
+            for entry_res in entries {
+                if let Ok(entry) = entry_res {
+                    let path = entry.path();
+                    if let Ok(path_str) = path.into_os_string().into_string() {
+                        let scheme = path_str.trim_start_matches(':').trim_matches('/');
+                        if scheme.starts_with("disk") {
+                            if scheme == "disk/live" {
+                                // Skip live disks
+                                continue;
+                            }
 
-                        schemes.push(format!("{}:", scheme));
+                            schemes.push(format!("{}:", scheme));
+                        }
                     }
                 }
             }
-        },
+        }
         Err(err) => {
             eprintln!("installer_tui: failed to list schemes: {}", err);
         }
     }
 
     for scheme in schemes {
-        let is_dir = fs::metadata(&scheme)
-            .map(|x| x.is_dir())
-            .unwrap_or(false);
+        let is_dir = fs::metadata(&scheme).map(|x| x.is_dir()).unwrap_or(false);
         if is_dir {
             match fs::read_dir(&scheme) {
-                Ok(entries) => for entry_res in entries {
-                    if let Ok(entry) = entry_res {
-                        if let Ok(file_name) = entry.file_name().into_string() {
-                            if file_name.contains('p') {
-                                // Skip partitions
-                                continue;
-                            }
+                Ok(entries) => {
+                    for entry_res in entries {
+                        if let Ok(entry) = entry_res {
+                            if let Ok(file_name) = entry.file_name().into_string() {
+                                if file_name.contains('p') {
+                                    // Skip partitions
+                                    continue;
+                                }
 
-                            if let Ok(path) = entry.path().into_os_string().into_string() {
-                                if let Ok(metadata) = entry.metadata() {
-                                    let size = metadata.len();
-                                    if size > 0 {
-                                        paths.push((path, size));
+                                if let Ok(path) = entry.path().into_os_string().into_string() {
+                                    if let Ok(metadata) = entry.metadata() {
+                                        let size = metadata.len();
+                                        if size > 0 {
+                                            paths.push((path, size));
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                },
+                }
                 Err(err) => {
                     eprintln!("installer_tui: failed to list '{}': {}", scheme, err);
                 }
@@ -102,14 +95,14 @@ fn format_size(size: u64) -> String {
     }
 }
 
-fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<(), failure::Error> {
+fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<()> {
     if let Some(parent) = dest.parent() {
         // Parent may be a symlink
-        if ! parent.is_symlink() {
+        if !parent.is_symlink() {
             match fs::create_dir_all(&parent) {
                 Ok(()) => (),
                 Err(err) => {
-                    return Err(format_err!("failed to create directory {}: {}", parent.display(), err));
+                    bail!("failed to create directory {}: {}", parent.display(), err);
                 }
             }
         }
@@ -118,36 +111,47 @@ fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<(), failure::Err
     let metadata = match fs::symlink_metadata(&src) {
         Ok(ok) => ok,
         Err(err) => {
-            return Err(format_err!("failed to read metadata of {}: {}", src.display(), err));
-        },
+            bail!("failed to read metadata of {}: {}", src.display(), err);
+        }
     };
 
     if metadata.file_type().is_symlink() {
         let real_src = match fs::read_link(&src) {
             Ok(ok) => ok,
             Err(err) => {
-                return Err(format_err!("failed to read link {}: {}", src.display(), err));
+                bail!("failed to read link {}: {}", src.display(), err);
             }
         };
 
         match symlink(&real_src, &dest) {
             Ok(()) => (),
             Err(err) => {
-                return Err(format_err!("failed to copy link {} ({}) to {}: {}", src.display(), real_src.display(), dest.display(), err));
-            },
+                bail!(
+                    "failed to copy link {} ({}) to {}: {}",
+                    src.display(),
+                    real_src.display(),
+                    dest.display(),
+                    err
+                );
+            }
         }
     } else {
         let mut src_file = match fs::File::open(&src) {
             Ok(ok) => ok,
             Err(err) => {
-                return Err(format_err!("failed to open file {}: {}", src.display(), err));
+                bail!("failed to open file {}: {}", src.display(), err);
             }
         };
 
-        let mut dest_file = match fs::OpenOptions::new().write(true).create_new(true).mode(metadata.mode()).open(&dest) {
+        let mut dest_file = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(metadata.mode())
+            .open(&dest)
+        {
             Ok(ok) => ok,
             Err(err) => {
-                return Err(format_err!("failed to create file {}: {}", dest.display(), err));
+                bail!("failed to create file {}: {}", dest.display(), err);
             }
         };
 
@@ -155,7 +159,7 @@ fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<(), failure::Err
             let count = match src_file.read(buf) {
                 Ok(ok) => ok,
                 Err(err) => {
-                    return Err(format_err!("failed to read file {}: {}", src.display(), err));
+                    bail!("failed to read file {}: {}", src.display(), err);
                 }
             };
 
@@ -166,7 +170,7 @@ fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<(), failure::Err
             match dest_file.write_all(&buf[..count]) {
                 Ok(()) => (),
                 Err(err) => {
-                    return Err(format_err!("failed to write file {}: {}", dest.display(), err));
+                    bail!("failed to write file {}: {}", dest.display(), err);
                 }
             }
         }
@@ -175,7 +179,11 @@ fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<(), failure::Err
     Ok(())
 }
 
-fn package_files(root_path: &Path, config: &mut Config, files: &mut Vec<String>) -> Result<(), pkgar::Error> {
+fn package_files(
+    root_path: &Path,
+    config: &mut Config,
+    files: &mut Vec<String>,
+) -> Result<(), pkgar::Error> {
     //TODO: Remove packages from config where all files are located (and have valid shasum?)
     config.packages.clear();
 
@@ -189,18 +197,15 @@ fn package_files(root_path: &Path, config: &mut Config, files: &mut Vec<String>)
         if pkg_path.extension() == Some(OsStr::new("pkgar_head")) {
             let mut pkg = PackageHead::new(&pkg_path, &root_path, &pkey)?;
             for entry in pkg.read_entries()? {
-                files.push(
-                    entry
-                        .check_path()?
-                        .to_str().unwrap()
-                        .to_string()
-                );
+                files.push(entry.check_path()?.to_str().unwrap().to_string());
             }
             files.push(
                 pkg_path
-                    .strip_prefix(root_path).unwrap()
-                    .to_str().unwrap()
-                    .to_string()
+                    .strip_prefix(root_path)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
             );
         }
     }
@@ -227,7 +232,7 @@ fn choose_disk() -> String {
                 Ok(0) => {
                     eprintln!("installer_tui: failed to read line: end of input");
                     process::exit(1);
-                },
+                }
                 Ok(_) => (),
                 Err(err) => {
                     eprintln!("installer_tui: failed to read line: {}", err);
@@ -242,7 +247,7 @@ fn choose_disk() -> String {
                     } else {
                         eprintln!("{} not from 1 to {}", i, paths.len());
                     }
-                },
+                }
                 Err(err) => {
                     eprintln!("invalid input: {}", err);
                 }
@@ -262,7 +267,7 @@ fn choose_password() -> Option<String> {
     eprintln!();
 
     if password.is_empty() {
-       return None;
+        return None;
     }
 
     Some(password)
@@ -311,28 +316,22 @@ fn main() {
         password_opt: password_opt.as_ref().map(|x| x.as_bytes()),
         efi_partition_size: None,
     };
-    let res = with_whole_disk(&disk_path, &disk_option, |mount_path| -> Result<(), failure::Error> {
+    let res = with_whole_disk(&disk_path, &disk_option, |mount_path| -> Result<()> {
         let mut config: Config = Config::from_file(&root_path.join("filesystem.toml"))?;
 
         // Copy filesystem.toml, which is not packaged
-        let mut files = vec![
-            "filesystem.toml".to_string(),
-        ];
+        let mut files = vec!["filesystem.toml".to_string()];
 
         // Copy files from locally installed packages
-        if let Err(err) = package_files(&root_path, &mut config, &mut files) {
-            return Err(format_err!("failed to read package files: {}", err));
-        }
+        package_files(&root_path, &mut config, &mut files)
+            // TODO: implement Error trait
+            .map_err(|err| anyhow!("failed to read package files: {err}"))?;
 
         // Perform config install (after packages have been converted to files)
         eprintln!("configuring system");
         let cookbook: Option<&'static str> = None;
-        redox_installer::install_dir(config, mount_path, cookbook).map_err(|err| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                err
-            )
-        })?;
+        redox_installer::install_dir(config, mount_path, cookbook)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
 
         // Sort and remove duplicates
         files.sort();
@@ -357,7 +356,7 @@ fn main() {
         Ok(()) => {
             eprintln!("installer_tui: installed successfully");
             process::exit(0);
-        },
+        }
         Err(err) => {
             eprintln!("installer_tui: failed to install: {}", err);
             process::exit(1);

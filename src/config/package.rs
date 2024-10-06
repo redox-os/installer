@@ -3,11 +3,14 @@
 pub enum PackageConfig {
     Empty,
     Build(String),
+
+    // TODO: Sum type
     Spec {
         version: Option<String>,
         git: Option<String>,
         path: Option<String>,
-    }
+        pkg_path: Option<String>,
+    },
 }
 
 impl Default for PackageConfig {

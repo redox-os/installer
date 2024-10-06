@@ -1,43 +1,30 @@
 #[macro_use]
 extern crate serde_derive;
-extern crate argon2;
-extern crate libc;
-extern crate liner;
-#[macro_use]
-extern crate failure;
-extern crate pkgutils;
-extern crate rand;
-extern crate redoxfs;
-extern crate syscall;
-extern crate termion;
 
 mod config;
 mod disk_wrapper;
 
-pub use config::Config;
-pub use config::file::FileConfig;
-pub use config::package::PackageConfig;
-use disk_wrapper::DiskWrapper;
+pub use crate::config::file::FileConfig;
+pub use crate::config::package::PackageConfig;
+pub use crate::config::Config;
+use crate::disk_wrapper::DiskWrapper;
 
-use failure::{Error, err_msg};
-use rand::{RngCore, rngs::OsRng};
+use anyhow::{bail, Result};
+use pkgutils::{Package, Repo};
+use rand::{rngs::OsRng, RngCore};
 use redoxfs::{unmount_path, Disk, DiskIo, FileSystem};
 use termion::input::TermRead;
-use pkgutils::{Repo, Package};
 
 use std::{
     collections::BTreeMap,
-    env,
-    fs,
+    env, fs,
     io::{self, Seek, SeekFrom, Write},
     path::Path,
     process,
     sync::mpsc::channel,
-    time::{SystemTime, UNIX_EPOCH},
     thread,
+    time::{SystemTime, UNIX_EPOCH},
 };
-
-pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 pub struct DiskOption<'a> {
     pub bootloader_bios: &'a [u8],
@@ -50,10 +37,7 @@ const REMOTE: &'static str = "https://static.redox-os.org/pkg";
 
 fn get_target() -> String {
     env::var("TARGET").unwrap_or(
-        option_env!("TARGET").map_or(
-            "x86_64-unknown-redox".to_string(),
-            |x| x.to_string()
-        )
+        option_env!("TARGET").map_or("x86_64-unknown-redox".to_string(), |x| x.to_string()),
     )
 }
 
@@ -66,7 +50,7 @@ fn hash_password(password: &str) -> Result<String> {
         let hash = argon2::hash_encoded(password.as_bytes(), salt.as_bytes(), &config)?;
         Ok(hash)
     } else {
-        Ok("".to_string())
+        Ok("".into())
     }
 }
 
@@ -88,15 +72,14 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
     let confirm_password = stdin.read_passwd(&mut stdout)?;
 
     // Note: Actually comparing two Option<String> values
-    if confirm_password == password {
-        Ok(password.unwrap_or("".to_string()))
-    } else {
-        Err(err_msg("passwords do not match"))
+    if confirm_password != password {
+        bail!("passwords do not match");
     }
+    Ok(password.unwrap_or("".to_string()))
 }
 
 //TODO: error handling
-fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option<S>) {
+fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
     let target = &get_target();
 
     let mut repo = Repo::new(target);
@@ -104,68 +87,127 @@ fn install_packages<S: AsRef<str>>(config: &Config, dest: &str, cookbook: Option
 
     if let Some(cookbook) = cookbook {
         let dest_pkg = format!("{}/pkg", dest);
-        if ! Path::new(&dest_pkg).exists() {
+        if !Path::new(&dest_pkg).exists() {
             fs::create_dir(&dest_pkg).unwrap();
         }
 
         for (packagename, package) in &config.packages {
-            let pkgar_path = format!("{}/{}/repo/{}/{}.pkgar",
-                                     env::current_dir().unwrap().to_string_lossy(),
-                                     cookbook.as_ref(), target, packagename);
-            let from_remote = match (config.general.repo_binary, package) {
-                (Some(true), PackageConfig::Empty) => true,
-                (Some(true), PackageConfig::Spec { version: None, git: None, path: None }) => true,
-                (_, PackageConfig::Build(rule)) if rule == "binary" => true,
-                _ => false
-            };
-            if from_remote {
-                println!("Installing package from remote: {}", packagename);
-                repo.fetch(&packagename).unwrap().install(dest).unwrap();
-            } else if Path::new(&pkgar_path).exists() {
-                println!("Installing package from local repo: {}", packagename);
-                let public_path = format!("{}/{}/build/id_ed25519.pub.toml",
-                                          env::current_dir().unwrap().to_string_lossy(),
-                                          cookbook.as_ref());
-                pkgar::extract(&public_path, &pkgar_path, dest).unwrap();
+            let pkgar_path = format!(
+                "{cwd}/{cookbook}/repo/{target}/{packagename}.pkgar",
+                cwd = env::current_dir().unwrap().to_string_lossy(),
+            );
 
-                let head_path = format!("{}/{}.pkgar_head", dest_pkg, packagename);
-                pkgar::split(&public_path, &pkgar_path, &head_path, Option::<&str>::None).unwrap();
-            } else {
-                println!("Installing package tar.gz from local repo: {}", packagename);
-                let path = format!("{}/{}/repo/{}/{}.tar.gz",
-                                   env::current_dir().unwrap().to_string_lossy(),
-                                   cookbook.as_ref(), target, packagename);
-                Package::from_path(&path).unwrap().install(dest).unwrap();
+            enum Rule<'a> {
+                RemotePrebuilt,
+                LocalPrebuilt { pkg_path: &'a str },
+                Build,
+            }
+
+            let rule = match (config.general.repo_binary, package) {
+                (
+                    Some(true),
+                    PackageConfig::Empty
+                    | PackageConfig::Spec {
+                        version: None,
+                        git: None,
+                        path: None,
+                        pkg_path: None,
+                    },
+                ) => {
+                    // prebuilt
+                    Rule::RemotePrebuilt
+                }
+                (_, PackageConfig::Build(rule)) if rule == "binary" => Rule::RemotePrebuilt,
+                (
+                    _,
+                    PackageConfig::Spec {
+                        pkg_path: Some(pkg_path),
+                        ..
+                    },
+                ) => Rule::LocalPrebuilt {
+                    pkg_path: &*pkg_path,
+                },
+
+                _ => Rule::Build,
+            };
+
+            match rule {
+                Rule::LocalPrebuilt { pkg_path } => {
+                    println!(
+                        "Installing package from local pkgar file: {packagename} <- `{pkg_path}`"
+                    );
+                    Package::from_path(pkg_path).unwrap().install(dest).unwrap();
+                }
+                Rule::RemotePrebuilt => {
+                    println!("Installing package from remote: {packagename}");
+                    repo.fetch(&packagename).unwrap().install(dest).unwrap();
+                }
+                Rule::Build if Path::new(&pkgar_path).exists() => {
+                    println!("Installing package from local repo: {}", packagename);
+                    let public_path = format!(
+                        "{cwd}/{cookbook}/build/id_ed25519.pub.toml",
+                        cwd = env::current_dir().unwrap().to_string_lossy(),
+                    );
+                    pkgar::extract(&public_path, &pkgar_path, dest).unwrap();
+
+                    let head_path = format!("{dest_pkg}/{packagename}.pkgar_head");
+                    pkgar::split(&public_path, &pkgar_path, &head_path, Option::<&str>::None)
+                        .unwrap();
+                }
+                Rule::Build => {
+                    println!("Installing package tar.gz from local repo: {packagename}");
+                    let path = format!(
+                        "{cwd}/{cookbook}/repo/{target}/{packagename}.tar.gz",
+                        cwd = env::current_dir().unwrap().to_string_lossy(),
+                    );
+                    Package::from_path(&path).unwrap().install(dest).unwrap();
+                }
             }
         }
     } else {
-        for (packagename, _package) in &config.packages {
-            println!("Installing package from remote: {}", packagename);
-            repo.fetch(&packagename).unwrap().install(dest).unwrap();
+        for (packagename, package) in &config.packages {
+            let mut package = if let PackageConfig::Spec {
+                pkg_path: Some(override_path),
+                ..
+            } = package
+            {
+                println!("Installing package from local file: {}", packagename);
+                Package::from_path(override_path).unwrap()
+            } else {
+                println!("Installing package from remote: {}", packagename);
+                repo.fetch(&packagename).unwrap()
+            };
+            package.install(dest).unwrap();
         }
     }
 }
 
-pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P, cookbook: Option<S>) -> Result<()> {
+pub fn install_dir(
+    config: Config,
+    output_dir: impl AsRef<Path>,
+    cookbook: Option<&str>,
+) -> Result<()> {
     //let mut context = liner::Context::new();
 
     macro_rules! prompt {
-        ($dst:expr, $def:expr, $($arg:tt)*) => (if config.general.prompt.unwrap_or(true) {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "prompt not currently supported"
-            ))
-            // match unwrap_or_prompt($dst, &mut context, &format!($($arg)*)) {
-            //     Ok(res) => if res.is_empty() {
-            //         Ok($def)
-            //     } else {
-            //         Ok(res)
-            //     },
-            //     Err(err) => Err(err)
-            // }
-        } else {
-            Ok($dst.unwrap_or($def))
-        })
+        ($dst:expr, $def:expr, $($arg:tt)*) => {
+            if config.general.prompt.unwrap_or(true) {
+                Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "prompt not currently supported",
+                ))
+                // match unwrap_or_prompt($dst, &mut context, &format!($($arg)*)) {
+                //     Ok(res) => if res.is_empty() {
+                //         Ok($def)
+                //     } else {
+                //         Ok(res)
+                //     },
+                //     Err(err) => Err(err)
+                // }
+            } else {
+                Ok($dst.unwrap_or($def))
+            }
+        };
     }
 
     let output_dir = output_dir.as_ref();
@@ -192,7 +234,8 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
         } else if config.general.prompt.unwrap_or(true) {
             prompt_password(
                 &format!("{}: enter password: ", username),
-                &format!("{}: confirm password: ", username))?
+                &format!("{}: confirm password: ", username),
+            )?
         } else {
             String::new()
         };
@@ -209,17 +252,34 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
             next_gid = gid + 1;
         }
 
-        let name = prompt!(user.name, username.clone(), "{}: name (GECOS) [{}]: ", username, username)?;
-        let home = prompt!(user.home, format!("/home/{}", username), "{}: home [/home/{}]: ", username, username)?;
-        let shell = prompt!(user.shell, "/bin/ion".to_string(), "{}: shell [/bin/ion]: ", username)?;
+        let name = prompt!(
+            user.name,
+            username.clone(),
+            "{}: name (GECOS) [{}]: ",
+            username,
+            username
+        )?;
+        let home = prompt!(
+            user.home,
+            format!("/home/{}", username),
+            "{}: home [/home/{}]: ",
+            username,
+            username
+        )?;
+        let shell = prompt!(
+            user.shell,
+            "/bin/ion".to_string(),
+            "{}: shell [/bin/ion]: ",
+            username
+        )?;
 
-        println!("Adding user {}:", username);
-        println!("\tPassword: {}", password);
-        println!("\tUID: {}", uid);
-        println!("\tGID: {}", gid);
-        println!("\tName: {}", name);
-        println!("\tHome: {}", home);
-        println!("\tShell: {}", shell);
+        println!("Adding user {username}:");
+        println!("\tPassword: {password}");
+        println!("\tUID: {uid}");
+        println!("\tGID: {gid}");
+        println!("\tName: {name}");
+        println!("\tHome: {home}");
+        println!("\tShell: {shell}");
 
         FileConfig {
             path: home.clone(),
@@ -230,7 +290,8 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
             uid: Some(uid),
             gid: Some(gid),
             recursive_chown: true,
-        }.create(&output_dir)?;
+        }
+        .create(&output_dir)?;
 
         if uid >= 1000 {
             // Create XDG user dirs
@@ -259,7 +320,8 @@ pub fn install_dir<P: AsRef<Path>, S: AsRef<str>>(config: Config, output_dir: P,
                     uid: Some(uid),
                     gid: Some(gid),
                     recursive_chown: false,
-                }.create(&output_dir)?;
+                }
+                .create(&output_dir)?;
             }
             FileConfig {
                 path: format!("{}/.config/user-dirs.dirs", home),
@@ -272,20 +334,22 @@ XDG_PICTURES_DIR="$HOME/Pictures"
 XDG_PUBLICSHARE_DIR="$HOME/Public"
 XDG_TEMPLATES_DIR="$HOME/Templates"
 XDG_VIDEOS_DIR="$HOME/Videos"
-"#.to_string(),
+"#
+                .to_string(),
                 symlink: false,
                 directory: false,
                 mode: Some(0o0600),
                 uid: Some(uid),
                 gid: Some(gid),
                 recursive_chown: false,
-            }.create(&output_dir)?;
+            }
+            .create(&output_dir)?;
         }
 
         let password = hash_password(&password)?;
 
-        passwd.push_str(&format!("{};{};{};{};{};{}\n", username, uid, gid, name, home, shell));
-        shadow.push_str(&format!("{};{}\n", username, password));
+        passwd.push_str(&format!("{username};{uid};{gid};{name};{home};{shell}\n",));
+        shadow.push_str(&format!("{username};{password}\n"));
         groups.push((username.clone(), gid, vec![username]));
     }
 
@@ -312,7 +376,8 @@ XDG_VIDEOS_DIR="$HOME/Videos"
             uid: None,
             gid: None,
             recursive_chown: false,
-        }.create(&output_dir)?;
+        }
+        .create(&output_dir)?;
     }
 
     if !shadow.is_empty() {
@@ -325,7 +390,8 @@ XDG_VIDEOS_DIR="$HOME/Videos"
             uid: Some(0),
             gid: Some(0),
             recursive_chown: false,
-        }.create(&output_dir)?;
+        }
+        .create(&output_dir)?;
     }
 
     if !groups.is_empty() {
@@ -335,8 +401,8 @@ XDG_VIDEOS_DIR="$HOME/Videos"
             use std::fmt::Write;
             writeln!(groups_data, "{name};x;{gid};{}", members.join(",")).unwrap();
 
-            println!("Adding group {}:", name);
-            println!("\tGID: {}", gid);
+            println!("Adding group {name}:");
+            println!("\tGID: {gid}");
             println!("\tMembers: {}", members.join(", "));
         }
 
@@ -350,16 +416,17 @@ XDG_VIDEOS_DIR="$HOME/Videos"
             uid: None,
             gid: None,
             recursive_chown: false,
-        }.create(&output_dir)?;
+        }
+        .create(&output_dir)?;
     }
 
     Ok(())
 }
 
-pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F)
-    -> Result<T> where
-        D: Disk + Send + 'static,
-        F: FnOnce(&Path) -> Result<T>
+pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F) -> Result<T>
+where
+    D: Disk + Send + 'static,
+    F: FnOnce(&Path) -> Result<T>,
 {
     let mount_path = if cfg!(target_os = "redox") {
         format!("file.redox_installer_{}", process::id())
@@ -368,35 +435,27 @@ pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F)
     };
 
     if cfg!(not(target_os = "redox")) {
-        if ! Path::new(&mount_path).exists() {
+        if !Path::new(&mount_path).exists() {
             fs::create_dir(&mount_path)?;
         }
     }
 
     let ctime = SystemTime::now().duration_since(UNIX_EPOCH)?;
-    let fs = FileSystem::create(
-        disk,
-        password_opt,
-        ctime.as_secs(),
-        ctime.subsec_nanos()
-    ).map_err(syscall_error)?;
+    let fs = FileSystem::create(disk, password_opt, ctime.as_secs(), ctime.subsec_nanos())
+        .map_err(syscall_error)?;
 
     let (tx, rx) = channel();
     let join_handle = {
         let mount_path = mount_path.clone();
         thread::spawn(move || {
-            let res = redoxfs::mount(
-                fs,
-                &mount_path,
-                |real_path| {
-                    tx.send(Ok(real_path.to_owned())).unwrap();
-                }
-            );
+            let res = redoxfs::mount(fs, &mount_path, |real_path| {
+                tx.send(Ok(real_path.to_owned())).unwrap();
+            });
             match res {
                 Ok(()) => (),
                 Err(err) => {
                     tx.send(Err(err)).unwrap();
-                },
+                }
             };
         })
     };
@@ -406,10 +465,13 @@ pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F)
             Ok(real_path) => callback(&real_path),
             Err(err) => return Err(err.into()),
         },
-        Err(_) => return Err(io::Error::new(
-            io::ErrorKind::NotConnected,
-            "redoxfs thread did not send a result"
-        ).into()),
+        Err(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "redoxfs thread did not send a result",
+            )
+            .into())
+        }
     };
 
     unmount_path(&mount_path)?;
@@ -423,7 +485,11 @@ pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F)
     res
 }
 
-pub fn fetch_bootloaders<S: AsRef<str>>(config: &Config, cookbook: Option<S>, live: bool) -> Result<(Vec<u8>, Vec<u8>)> {
+pub fn fetch_bootloaders(
+    config: &Config,
+    cookbook: Option<&str>,
+    live: bool,
+) -> Result<(Vec<u8>, Vec<u8>)> {
     let bootloader_dir = format!("/tmp/redox_installer_bootloader_{}", process::id());
 
     if Path::new(&bootloader_dir).exists() {
@@ -434,8 +500,10 @@ pub fn fetch_bootloaders<S: AsRef<str>>(config: &Config, cookbook: Option<S>, li
 
     let mut bootloader_config = Config::default();
     bootloader_config.general = config.general.clone();
-    bootloader_config.packages.insert("bootloader".to_string(), PackageConfig::default());
-    install_packages(&bootloader_config, &bootloader_dir, cookbook.as_ref());
+    bootloader_config
+        .packages
+        .insert("bootloader".to_string(), PackageConfig::default());
+    install_packages(&bootloader_config, &bootloader_dir, cookbook);
 
     let boot_dir = Path::new(&bootloader_dir).join("boot");
     let bios_path = boot_dir.join(if live {
@@ -466,10 +534,10 @@ pub fn fetch_bootloaders<S: AsRef<str>>(config: &Config, cookbook: Option<S>, li
 }
 
 //TODO: make bootloaders use Option, dynamically create BIOS and EFI partitions
-pub fn with_whole_disk<P, F, T>(disk_path: P, disk_option: &DiskOption, callback: F)
-    -> Result<T> where
-        P: AsRef<Path>,
-        F: FnOnce(&Path) -> Result<T>
+pub fn with_whole_disk<P, F, T>(disk_path: P, disk_option: &DiskOption, callback: F) -> Result<T>
+where
+    P: AsRef<Path>,
+    F: FnOnce(&Path) -> Result<T>,
 {
     let target = get_target();
 
@@ -478,7 +546,7 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, disk_option: &DiskOption, callback
         "i686-unknown-redox" => "BOOTIA32.EFI",
         "x86_64-unknown-redox" => "BOOTX64.EFI",
         _ => {
-            return Err(format_err!("target '{}' not supported", target));
+            bail!("target '{target}' not supported");
         }
     };
 
@@ -491,10 +559,9 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, disk_option: &DiskOption, callback
         512 => gpt::disk::LogicalBlockSize::Lb512,
         _ => {
             // TODO: support (and test) other block sizes
-            return Err(format_err!("block size {} not supported", block_size));
+            bail!("block size {block_size} not supported");
         }
     };
-
 
     // Calculate partition offsets
     let gpt_reserved = 34 * 512; // GPT always reserves 34 512-byte sectors
@@ -506,7 +573,11 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, disk_option: &DiskOption, callback
 
     // Second megabyte of the disk is reserved for EFI partition
     let efi_start = bios_end + 1;
-    let efi_size = if let Some(size) = disk_option.efi_partition_size { size as u64 } else { 1 };
+    let efi_size = if let Some(size) = disk_option.efi_partition_size {
+        size as u64
+    } else {
+        1
+    };
     let efi_end = efi_start + (efi_size * mibi / block_size) - 1;
 
     // The rest of the disk is RedoxFS, reserving the GPT table mirror at the end of disk
@@ -516,13 +587,17 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, disk_option: &DiskOption, callback
     // Format and install BIOS partition
     {
         // Write BIOS bootloader to disk
-        eprintln!("Write bootloader with size {:#x}", disk_option.bootloader_bios.len());
+        eprintln!(
+            "Write bootloader with size {:#x}",
+            disk_option.bootloader_bios.len()
+        );
         disk_file.seek(SeekFrom::Start(0))?;
         disk_file.write_all(&disk_option.bootloader_bios)?;
 
         // Replace MBR tables with protective MBR
+        // TODO: div_ceil
         let mbr_blocks = ((disk_size + block_size - 1) / block_size) - 1;
-        eprintln!("Writing protective MBR with disk blocks {:#x}", mbr_blocks);
+        eprintln!("Writing protective MBR with disk blocks {mbr_blocks:#x}");
         gpt::mbr::ProtectiveMBR::with_lb_size(mbr_blocks as u32)
             .update_conservative(&mut disk_file)?;
 
@@ -536,39 +611,48 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, disk_option: &DiskOption, callback
         // Add BIOS boot partition
         let mut partitions = BTreeMap::new();
         let mut partition_id = 1;
-        partitions.insert(partition_id, gpt::partition::Partition {
-            part_type_guid: gpt::partition_types::BIOS,
-            part_guid: uuid::Uuid::new_v4(),
-            first_lba: bios_start,
-            last_lba: bios_end,
-            flags: 0, // TODO
-            name: "BIOS".to_string(),
-        });
+        partitions.insert(
+            partition_id,
+            gpt::partition::Partition {
+                part_type_guid: gpt::partition_types::BIOS,
+                part_guid: uuid::Uuid::new_v4(),
+                first_lba: bios_start,
+                last_lba: bios_end,
+                flags: 0, // TODO
+                name: "BIOS".to_string(),
+            },
+        );
         partition_id += 1;
 
         // Add EFI boot partition
-        partitions.insert(partition_id, gpt::partition::Partition {
-            part_type_guid: gpt::partition_types::EFI,
-            part_guid: uuid::Uuid::new_v4(),
-            first_lba: efi_start,
-            last_lba: efi_end,
-            flags: 0, // TODO
-            name: "EFI".to_string(),
-        });
+        partitions.insert(
+            partition_id,
+            gpt::partition::Partition {
+                part_type_guid: gpt::partition_types::EFI,
+                part_guid: uuid::Uuid::new_v4(),
+                first_lba: efi_start,
+                last_lba: efi_end,
+                flags: 0, // TODO
+                name: "EFI".to_string(),
+            },
+        );
         partition_id += 1;
 
         // Add RedoxFS partition
-        partitions.insert(partition_id, gpt::partition::Partition {
-            //TODO: Use REDOX_REDOXFS type (needs GPT crate changes)
-            part_type_guid: gpt::partition_types::LINUX_FS,
-            part_guid: uuid::Uuid::new_v4(),
-            first_lba: redoxfs_start,
-            last_lba: redoxfs_end,
-            flags: 0,
-            name: "REDOX".to_string(),
-        });
+        partitions.insert(
+            partition_id,
+            gpt::partition::Partition {
+                //TODO: Use REDOX_REDOXFS type (needs GPT crate changes)
+                part_type_guid: gpt::partition_types::LINUX_FS,
+                part_guid: uuid::Uuid::new_v4(),
+                first_lba: redoxfs_start,
+                last_lba: redoxfs_end,
+                flags: 0,
+                name: "REDOX".to_string(),
+            },
+        );
 
-        eprintln!("Writing GPT tables: {:#?}", partitions);
+        eprintln!("Writing GPT tables: {partitions:#?}");
 
         // Initialize GPT table
         gpt_disk.update_partitions(partitions)?;
@@ -581,13 +665,13 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, disk_option: &DiskOption, callback
     {
         let disk_efi_start = efi_start * block_size;
         let disk_efi_end = (efi_end + 1) * block_size;
-        let mut disk_efi = fscommon::StreamSlice::new(
-            &mut disk_file,
-            disk_efi_start,
-            disk_efi_end,
-        )?;
+        let mut disk_efi =
+            fscommon::StreamSlice::new(&mut disk_file, disk_efi_start, disk_efi_end)?;
 
-        eprintln!("Formatting EFI partition with size {:#x}", disk_efi_end - disk_efi_start);
+        eprintln!(
+            "Formatting EFI partition with size {:#x}",
+            disk_efi_end - disk_efi_start
+        );
         fatfs::format_volume(&mut disk_efi, fatfs::FormatVolumeOptions::new())?;
 
         eprintln!("Opening EFI partition");
@@ -601,7 +685,11 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, disk_option: &DiskOption, callback
         let efi_dir = root_dir.open_dir("EFI")?;
         efi_dir.create_dir("BOOT")?;
 
-        eprintln!("Writing EFI/BOOT/{} file with size {:#x}", bootloader_efi_name, disk_option.bootloader_efi.len());
+        eprintln!(
+            "Writing EFI/BOOT/{} file with size {:#x}",
+            bootloader_efi_name,
+            disk_option.bootloader_efi.len()
+        );
         let boot_dir = efi_dir.open_dir("BOOT")?;
         let mut file = boot_dir.create_file(bootloader_efi_name)?;
         file.truncate()?;
@@ -609,40 +697,41 @@ pub fn with_whole_disk<P, F, T>(disk_path: P, disk_option: &DiskOption, callback
     }
 
     // Format and install RedoxFS partition
-    eprintln!("Installing to RedoxFS partition with size {:#x}", (redoxfs_end - redoxfs_start) * block_size);
+    eprintln!(
+        "Installing to RedoxFS partition with size {:#x}",
+        (redoxfs_end - redoxfs_start) * block_size
+    );
     let disk_redoxfs = DiskIo(fscommon::StreamSlice::new(
         disk_file,
         redoxfs_start * block_size,
-        (redoxfs_end + 1) * block_size
+        (redoxfs_end + 1) * block_size,
     )?);
-    with_redoxfs(
-        disk_redoxfs,
-        disk_option.password_opt,
-        callback
-    )
+    with_redoxfs(disk_redoxfs, disk_option.password_opt, callback)
 }
 
-pub fn install<P, S>(config: Config, output: P, cookbook: Option<S>, live: bool)
-    -> Result<()> where
-        P: AsRef<Path>,
-        S: AsRef<str>,
-{
-    println!("Install {:#?} to {}", config, output.as_ref().display());
+fn install_inner(config: Config, output: &Path, cookbook: Option<&str>, live: bool) -> Result<()> {
+    println!("Install {config:#?} to {}", output.display());
 
-    if output.as_ref().is_dir() {
+    if output.is_dir() {
         install_dir(config, output, cookbook)
     } else {
-        let (bootloader_bios, bootloader_efi) = fetch_bootloaders(&config, cookbook.as_ref(), live)?;
+        let (bootloader_bios, bootloader_efi) = fetch_bootloaders(&config, cookbook, live)?;
         let disk_option = DiskOption {
             bootloader_bios: &bootloader_bios,
             bootloader_efi: &bootloader_efi,
             password_opt: None,
             efi_partition_size: config.general.efi_partition_size,
         };
-        with_whole_disk(output, &disk_option,
-            move |mount_path| {
-                install_dir(config, mount_path, cookbook)
-            }
-        )
+        with_whole_disk(output, &disk_option, move |mount_path| {
+            install_dir(config, mount_path, cookbook)
+        })
     }
+}
+pub fn install(
+    config: Config,
+    output: impl AsRef<Path>,
+    cookbook: Option<&str>,
+    live: bool,
+) -> Result<()> {
+    install_inner(config, output.as_ref(), cookbook, live)
 }

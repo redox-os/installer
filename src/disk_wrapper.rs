@@ -21,10 +21,7 @@ enum Buffer<'a> {
 
 impl DiskWrapper {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let disk = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)?;
+        let disk = OpenOptions::new().read(true).write(true).open(path)?;
         let metadata = disk.metadata()?;
         let size = metadata.len();
         // TODO: get real block size: disk_metadata.blksize() works on disks but not image files
@@ -71,24 +68,27 @@ impl DiskWrapper {
             let remaining = buf_len.checked_sub(i).unwrap();
             let len = cmp::min(
                 remaining,
-                self.block.len().checked_sub(offset.try_into().unwrap()).unwrap()
+                self.block
+                    .len()
+                    .checked_sub(offset.try_into().unwrap())
+                    .unwrap(),
             );
 
-            self.disk.seek(SeekFrom::Start(block.checked_mul(block_len).unwrap()))?;
+            self.disk
+                .seek(SeekFrom::Start(block.checked_mul(block_len).unwrap()))?;
             self.disk.read_exact(&mut self.block)?;
 
             match buf {
                 Buffer::Read(read) => {
-                    read[i..i.checked_add(len).unwrap()].copy_from_slice(
-                        &self.block[offset..offset.checked_add(len).unwrap()]
-                    );
-                },
+                    read[i..i.checked_add(len).unwrap()]
+                        .copy_from_slice(&self.block[offset..offset.checked_add(len).unwrap()]);
+                }
                 Buffer::Write(write) => {
-                    self.block[offset..offset.checked_add(len).unwrap()].copy_from_slice(
-                        &write[i..i.checked_add(len).unwrap()]
-                    );
+                    self.block[offset..offset.checked_add(len).unwrap()]
+                        .copy_from_slice(&write[i..i.checked_add(len).unwrap()]);
 
-                    self.disk.seek(SeekFrom::Start(block.checked_mul(block_len).unwrap()))?;
+                    self.disk
+                        .seek(SeekFrom::Start(block.checked_mul(block_len).unwrap()))?;
                     self.disk.write_all(&mut self.block)?;
                 }
             }
@@ -112,12 +112,8 @@ impl Seek for DiskWrapper {
         let current: i64 = self.seek.try_into().unwrap();
         let end: i64 = self.size.try_into().unwrap();
         self.seek = match pos {
-            SeekFrom::Start(offset) => {
-                cmp::min(self.size, offset)
-            },
-            SeekFrom::End(offset) => {
-                cmp::max(0, cmp::min(end, end.wrapping_add(offset))) as u64
-            },
+            SeekFrom::Start(offset) => cmp::min(self.size, offset),
+            SeekFrom::End(offset) => cmp::max(0, cmp::min(end, end.wrapping_add(offset))) as u64,
             SeekFrom::Current(offset) => {
                 cmp::max(0, cmp::min(end, current.wrapping_add(offset))) as u64
             }
