@@ -1,14 +1,4 @@
-extern crate arg_parser;
-#[macro_use]
-extern crate failure;
-extern crate pkgar;
-extern crate pkgar_core;
-extern crate pkgar_keys;
-extern crate redox_installer;
-extern crate serde;
-extern crate termion;
-extern crate toml;
-
+use anyhow::{anyhow, bail, Result};
 use pkgar::{ext::EntryExt, PackageHead};
 use pkgar_core::PackageSrc;
 use pkgar_keys::PublicKeyFile;
@@ -105,18 +95,14 @@ fn format_size(size: u64) -> String {
     }
 }
 
-fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<(), failure::Error> {
+fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<()> {
     if let Some(parent) = dest.parent() {
         // Parent may be a symlink
         if !parent.is_symlink() {
             match fs::create_dir_all(&parent) {
                 Ok(()) => (),
                 Err(err) => {
-                    return Err(format_err!(
-                        "failed to create directory {}: {}",
-                        parent.display(),
-                        err
-                    ));
+                    bail!("failed to create directory {}: {}", parent.display(), err);
                 }
             }
         }
@@ -125,11 +111,7 @@ fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<(), failure::Err
     let metadata = match fs::symlink_metadata(&src) {
         Ok(ok) => ok,
         Err(err) => {
-            return Err(format_err!(
-                "failed to read metadata of {}: {}",
-                src.display(),
-                err
-            ));
+            bail!("failed to read metadata of {}: {}", src.display(), err);
         }
     };
 
@@ -137,35 +119,27 @@ fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<(), failure::Err
         let real_src = match fs::read_link(&src) {
             Ok(ok) => ok,
             Err(err) => {
-                return Err(format_err!(
-                    "failed to read link {}: {}",
-                    src.display(),
-                    err
-                ));
+                bail!("failed to read link {}: {}", src.display(), err);
             }
         };
 
         match symlink(&real_src, &dest) {
             Ok(()) => (),
             Err(err) => {
-                return Err(format_err!(
+                bail!(
                     "failed to copy link {} ({}) to {}: {}",
                     src.display(),
                     real_src.display(),
                     dest.display(),
                     err
-                ));
+                );
             }
         }
     } else {
         let mut src_file = match fs::File::open(&src) {
             Ok(ok) => ok,
             Err(err) => {
-                return Err(format_err!(
-                    "failed to open file {}: {}",
-                    src.display(),
-                    err
-                ));
+                bail!("failed to open file {}: {}", src.display(), err);
             }
         };
 
@@ -177,11 +151,7 @@ fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<(), failure::Err
         {
             Ok(ok) => ok,
             Err(err) => {
-                return Err(format_err!(
-                    "failed to create file {}: {}",
-                    dest.display(),
-                    err
-                ));
+                bail!("failed to create file {}: {}", dest.display(), err);
             }
         };
 
@@ -189,11 +159,7 @@ fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<(), failure::Err
             let count = match src_file.read(buf) {
                 Ok(ok) => ok,
                 Err(err) => {
-                    return Err(format_err!(
-                        "failed to read file {}: {}",
-                        src.display(),
-                        err
-                    ));
+                    bail!("failed to read file {}: {}", src.display(), err);
                 }
             };
 
@@ -204,11 +170,7 @@ fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<(), failure::Err
             match dest_file.write_all(&buf[..count]) {
                 Ok(()) => (),
                 Err(err) => {
-                    return Err(format_err!(
-                        "failed to write file {}: {}",
-                        dest.display(),
-                        err
-                    ));
+                    bail!("failed to write file {}: {}", dest.display(), err);
                 }
             }
         }
@@ -354,45 +316,41 @@ fn main() {
         password_opt: password_opt.as_ref().map(|x| x.as_bytes()),
         efi_partition_size: None,
     };
-    let res = with_whole_disk(
-        &disk_path,
-        &disk_option,
-        |mount_path| -> Result<(), failure::Error> {
-            let mut config: Config = Config::from_file(&root_path.join("filesystem.toml"))?;
+    let res = with_whole_disk(&disk_path, &disk_option, |mount_path| -> Result<()> {
+        let mut config: Config = Config::from_file(&root_path.join("filesystem.toml"))?;
 
-            // Copy filesystem.toml, which is not packaged
-            let mut files = vec!["filesystem.toml".to_string()];
+        // Copy filesystem.toml, which is not packaged
+        let mut files = vec!["filesystem.toml".to_string()];
 
-            // Copy files from locally installed packages
-            if let Err(err) = package_files(&root_path, &mut config, &mut files) {
-                return Err(format_err!("failed to read package files: {}", err));
-            }
+        // Copy files from locally installed packages
+        package_files(&root_path, &mut config, &mut files)
+            // TODO: implement Error trait
+            .map_err(|err| anyhow!("failed to read package files: {err}"))?;
 
-            // Perform config install (after packages have been converted to files)
-            eprintln!("configuring system");
-            let cookbook: Option<&'static str> = None;
-            redox_installer::install_dir(config, mount_path, cookbook)
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+        // Perform config install (after packages have been converted to files)
+        eprintln!("configuring system");
+        let cookbook: Option<&'static str> = None;
+        redox_installer::install_dir(config, mount_path, cookbook)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
 
-            // Sort and remove duplicates
-            files.sort();
-            files.dedup();
+        // Sort and remove duplicates
+        files.sort();
+        files.dedup();
 
-            // Install files
-            let mut buf = vec![0; 4 * MIB as usize];
-            for (i, name) in files.iter().enumerate() {
-                eprintln!("copy {} [{}/{}]", name, i, files.len());
+        // Install files
+        let mut buf = vec![0; 4 * MIB as usize];
+        for (i, name) in files.iter().enumerate() {
+            eprintln!("copy {} [{}/{}]", name, i, files.len());
 
-                let src = root_path.join(name);
-                let dest = mount_path.join(name);
-                copy_file(&src, &dest, &mut buf)?;
-            }
+            let src = root_path.join(name);
+            let dest = mount_path.join(name);
+            copy_file(&src, &dest, &mut buf)?;
+        }
 
-            eprintln!("finished installing, unmounting filesystem");
+        eprintln!("finished installing, unmounting filesystem");
 
-            Ok(())
-        },
-    );
+        Ok(())
+    });
 
     match res {
         Ok(()) => {

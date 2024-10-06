@@ -1,15 +1,5 @@
 #[macro_use]
 extern crate serde_derive;
-extern crate argon2;
-extern crate libc;
-extern crate liner;
-#[macro_use]
-extern crate failure;
-extern crate pkgutils;
-extern crate rand;
-extern crate redoxfs;
-extern crate syscall;
-extern crate termion;
 
 mod config;
 mod disk_wrapper;
@@ -19,7 +9,7 @@ pub use crate::config::package::PackageConfig;
 pub use crate::config::Config;
 use crate::disk_wrapper::DiskWrapper;
 
-use failure::{err_msg, Error};
+use anyhow::{bail, Result};
 use pkgutils::{Package, Repo};
 use rand::{rngs::OsRng, RngCore};
 use redoxfs::{unmount_path, Disk, DiskIo, FileSystem};
@@ -35,8 +25,6 @@ use std::{
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
-
-pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 pub struct DiskOption<'a> {
     pub bootloader_bios: &'a [u8],
@@ -62,7 +50,7 @@ fn hash_password(password: &str) -> Result<String> {
         let hash = argon2::hash_encoded(password.as_bytes(), salt.as_bytes(), &config)?;
         Ok(hash)
     } else {
-        Ok("".to_string())
+        Ok("".into())
     }
 }
 
@@ -84,11 +72,10 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
     let confirm_password = stdin.read_passwd(&mut stdout)?;
 
     // Note: Actually comparing two Option<String> values
-    if confirm_password == password {
-        Ok(password.unwrap_or("".to_string()))
-    } else {
-        Err(err_msg("passwords do not match"))
+    if confirm_password != password {
+        bail!("passwords do not match");
     }
+    Ok(password.unwrap_or("".to_string()))
 }
 
 //TODO: error handling
@@ -526,7 +513,7 @@ where
         "i686-unknown-redox" => "BOOTIA32.EFI",
         "x86_64-unknown-redox" => "BOOTX64.EFI",
         _ => {
-            return Err(format_err!("target '{}' not supported", target));
+            bail!("target '{target}' not supported");
         }
     };
 
@@ -539,7 +526,7 @@ where
         512 => gpt::disk::LogicalBlockSize::Lb512,
         _ => {
             // TODO: support (and test) other block sizes
-            return Err(format_err!("block size {} not supported", block_size));
+            bail!("block size {block_size} not supported");
         }
     };
 
