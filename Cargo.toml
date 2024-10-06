@@ -6,6 +6,7 @@ license = "MIT"
 authors = ["Jeremy Soller <jackpot51@gmail.com>"]
 repository = "https://gitlab.redox-os.org/redox-os/installer"
 default-run = "redox_installer"
+edition = "2021"
 
 [[bin]]
 name = "redox_installer"
@@ -24,9 +25,9 @@ name = "redox_installer"
 path = "src/lib.rs"
 
 [dependencies]
+anyhow = "1.0.89"
 arg_parser = "0.1.0"
 cc = "=1.0.99" # Hack for ring 0.13.5 not building
-failure = "0.1.8"
 fatfs = "0.3.0"
 fscommon = "0.1.1"
 gpt = "3.0.0"

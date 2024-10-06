@@ -1,12 +1,11 @@
-
-use Result;
+use crate::Result;
 use libc::{gid_t, uid_t};
 
-use std::io::{Error, Write};
 use std::ffi::{CString, OsStr};
 use std::fs::{self, File};
+use std::io::{Error, Write};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::Path;
 
 //type Result<T> = std::result::Result<T, Error>;
@@ -48,8 +47,7 @@ pub struct FileConfig {
 impl FileConfig {
     pub(crate) fn create<P: AsRef<Path>>(&self, prefix: P) -> Result<()> {
         let path = self.path.trim_start_matches('/');
-        let target_file = prefix.as_ref()
-            .join(path);
+        let target_file = prefix.as_ref().join(path);
 
         if self.directory {
             println!("Create directory {}", target_file.display());
@@ -76,11 +74,9 @@ impl FileConfig {
 
     fn apply_perms<P: AsRef<Path>>(&self, target: P) -> Result<()> {
         let path = target.as_ref();
-        let mode = self.mode.unwrap_or_else(|| if self.directory {
-                0o0755
-            } else {
-                0o0644
-            });
+        let mode = self
+            .mode
+            .unwrap_or_else(|| if self.directory { 0o0755 } else { 0o0644 });
         let uid = self.uid.unwrap_or(!0);
         let gid = self.gid.unwrap_or(!0);
 

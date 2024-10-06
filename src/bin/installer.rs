@@ -114,6 +114,7 @@ fn main() {
                                 version: None,
                                 git: None,
                                 path: None,
+                                pkg_path: None,
                             } => false,
                             _ => true,
                         })
@@ -143,7 +144,8 @@ fn main() {
         };
 
         if let Some(path) = parser.args.get(0) {
-            if let Err(err) = redox_installer::install(config, path, cookbook, parser.found("live"))
+            if let Err(err) =
+                redox_installer::install(config, path, cookbook.as_deref(), parser.found("live"))
             {
                 writeln!(stderr, "installer: failed to install: {}", err).unwrap();
                 process::exit(1);

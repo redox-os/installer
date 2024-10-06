@@ -3,6 +3,9 @@ use std::fs;
 use std::mem;
 use std::path::{Path, PathBuf};
 
+use anyhow::bail;
+use anyhow::Result;
+
 pub mod file;
 pub mod general;
 pub mod package;
@@ -25,16 +28,16 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_file(path: &Path) -> Result<Self, failure::Error> {
+    pub fn from_file(path: &Path) -> Result<Self> {
         let mut config: Config = match fs::read_to_string(&path) {
             Ok(config_data) => match toml::from_str(&config_data) {
                 Ok(config) => config,
                 Err(err) => {
-                    return Err(format_err!("{}: failed to decode: {}", path.display(), err));
+                    bail!("{}: failed to decode: {}", path.display(), err);
                 }
             },
             Err(err) => {
-                return Err(format_err!("{}: failed to read: {}", path.display(), err));
+                bail!("{}: failed to read: {}", path.display(), err);
             }
         };
 
@@ -43,7 +46,7 @@ impl Config {
         let mut configs = mem::take(&mut config.include)
             .into_iter()
             .map(|path| Config::from_file(&config_dir.join(path)))
-            .collect::<Result<Vec<Config>, failure::Error>>()?;
+            .collect::<Result<Vec<Config>>>()?;
         configs.push(config); // Put ourself last to ensure that it overwrites anything else.
 
         config = configs.remove(0);
