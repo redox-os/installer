@@ -1,6 +1,6 @@
 [package]
 name = "redox_installer"
-version = "0.2.24"
+version = "0.2.25"
 description = "A Redox filesystem builder"
 license = "MIT"
 authors = ["Jeremy Soller <jackpot51@gmail.com>"]

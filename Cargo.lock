@@ -1422,7 +1422,7 @@ dependencies = [
 
 [[package]]
 name = "redox_installer"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "anyhow",
  "arg_parser",
