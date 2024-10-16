@@ -545,6 +545,7 @@ where
         "aarch64-unknown-redox" => "BOOTAA64.EFI",
         "i686-unknown-redox" => "BOOTIA32.EFI",
         "x86_64-unknown-redox" => "BOOTX64.EFI",
+        "riscv64gc-unknown-redox" => "BOOTRISCV64.EFI",
         _ => {
             bail!("target '{target}' not supported");
         }
