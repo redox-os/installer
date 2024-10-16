@@ -37,7 +37,7 @@ pkgar-core = "0.1.13"
 pkgar-keys = "0.1.13"
 rand = "0.8"
 redox_liner = "0.5"
-redox_pkgutils = { git = "https://gitlab.redox-os.org/redox-os/pkgutils.git" }
+redox_pkgutils = "0.1.9"
 redox_syscall = "0.5.2"
 redoxfs = "0.6.5"
 rust-argon2 = "0.8.2"
@@ -48,5 +48,4 @@ toml = "0.8"
 uuid = { version = "1.4", features = ["v4"] }
 
 [patch.crates-io]
-ring = { git = "https://gitlab.redox-os.org/redox-os/ring.git", branch = "redox-unix-0.13.5" }
 cc-11 = { git = "https://github.com/tea/cc-rs", branch="riscv-abi-arch-fix", package = "cc" }
