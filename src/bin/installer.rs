@@ -114,7 +114,6 @@ fn main() {
                                 version: None,
                                 git: None,
                                 path: None,
-                                pkg_path: None,
                             } => false,
                             _ => true,
                         })

@@ -9,7 +9,6 @@ pub enum PackageConfig {
         version: Option<String>,
         git: Option<String>,
         path: Option<String>,
-        pkg_path: Option<String>,
     },
 }
 

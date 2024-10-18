@@ -10,17 +10,19 @@ pub use crate::config::Config;
 use crate::disk_wrapper::DiskWrapper;
 
 use anyhow::{bail, Result};
-use pkgutils::{Package, Repo};
+use pkg::Library;
 use rand::{rngs::OsRng, RngCore};
 use redoxfs::{unmount_path, Disk, DiskIo, FileSystem};
 use termion::input::TermRead;
 
 use std::{
+    cell::RefCell,
     collections::BTreeMap,
     env, fs,
     io::{self, Seek, SeekFrom, Write},
     path::Path,
     process,
+    rc::Rc,
     sync::mpsc::channel,
     thread,
     time::{SystemTime, UNIX_EPOCH},
@@ -32,8 +34,6 @@ pub struct DiskOption<'a> {
     pub password_opt: Option<&'a [u8]>,
     pub efi_partition_size: Option<u32>, //MiB
 }
-
-const REMOTE: &'static str = "https://static.redox-os.org/pkg";
 
 fn get_target() -> String {
     env::var("TARGET").unwrap_or(
@@ -78,12 +78,21 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
     Ok(password.unwrap_or("".to_string()))
 }
 
+fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &str) {
+    let public_path = format!("{cookbook}/build/id_ed25519.pub.toml",);
+    let pkgar_path = format!("{cookbook}/repo/{target}/{packagename}.pkgar");
+    pkgar::extract(&public_path, &pkgar_path, dest).unwrap();
+
+    let head_path = format!("{dest}/pkg/{packagename}.pkgar_head");
+    pkgar::split(&public_path, &pkgar_path, &head_path, Option::<&str>::None).unwrap();
+}
+
 //TODO: error handling
 fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
     let target = &get_target();
 
-    let mut repo = Repo::new(target);
-    repo.add_remote(REMOTE);
+    let callback = pkg::callback::IndicatifCallback::new();
+    let mut library = Library::new(dest, target, Rc::new(RefCell::new(callback))).unwrap();
 
     if let Some(cookbook) = cookbook {
         let dest_pkg = format!("{}/pkg", dest);
@@ -92,14 +101,8 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
         }
 
         for (packagename, package) in &config.packages {
-            let pkgar_path = format!(
-                "{cwd}/{cookbook}/repo/{target}/{packagename}.pkgar",
-                cwd = env::current_dir().unwrap().to_string_lossy(),
-            );
-
-            enum Rule<'a> {
+            enum Rule {
                 RemotePrebuilt,
-                LocalPrebuilt { pkg_path: &'a str },
                 Build,
             }
 
@@ -111,75 +114,35 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
                         version: None,
                         git: None,
                         path: None,
-                        pkg_path: None,
                     },
-                ) => {
-                    // prebuilt
-                    Rule::RemotePrebuilt
-                }
+                ) => Rule::RemotePrebuilt,
                 (_, PackageConfig::Build(rule)) if rule == "binary" => Rule::RemotePrebuilt,
-                (
-                    _,
-                    PackageConfig::Spec {
-                        pkg_path: Some(pkg_path),
-                        ..
-                    },
-                ) => Rule::LocalPrebuilt {
-                    pkg_path: &*pkg_path,
-                },
-
                 _ => Rule::Build,
             };
 
             match rule {
-                Rule::LocalPrebuilt { pkg_path } => {
-                    println!(
-                        "Installing package from local pkgar file: {packagename} <- `{pkg_path}`"
-                    );
-                    Package::from_path(pkg_path).unwrap().install(dest).unwrap();
-                }
                 Rule::RemotePrebuilt => {
                     println!("Installing package from remote: {packagename}");
-                    repo.fetch(&packagename).unwrap().install(dest).unwrap();
-                }
-                Rule::Build if Path::new(&pkgar_path).exists() => {
-                    println!("Installing package from local repo: {}", packagename);
-                    let public_path = format!(
-                        "{cwd}/{cookbook}/build/id_ed25519.pub.toml",
-                        cwd = env::current_dir().unwrap().to_string_lossy(),
-                    );
-                    pkgar::extract(&public_path, &pkgar_path, dest).unwrap();
-
-                    let head_path = format!("{dest_pkg}/{packagename}.pkgar_head");
-                    pkgar::split(&public_path, &pkgar_path, &head_path, Option::<&str>::None)
+                    library
+                        .install(vec![pkg::PackageName::new(packagename).unwrap()])
                         .unwrap();
                 }
                 Rule::Build => {
-                    println!("Installing package tar.gz from local repo: {packagename}");
-                    let path = format!(
-                        "{cwd}/{cookbook}/repo/{target}/{packagename}.tar.gz",
-                        cwd = env::current_dir().unwrap().to_string_lossy(),
-                    );
-                    Package::from_path(&path).unwrap().install(dest).unwrap();
+                    println!("Installing package from local repo: {}", packagename);
+                    install_local_pkgar(cookbook, target, packagename, dest);
                 }
             }
         }
     } else {
-        for (packagename, package) in &config.packages {
-            let mut package = if let PackageConfig::Spec {
-                pkg_path: Some(override_path),
-                ..
-            } = package
-            {
-                println!("Installing package from local file: {}", packagename);
-                Package::from_path(override_path).unwrap()
-            } else {
-                println!("Installing package from remote: {}", packagename);
-                repo.fetch(&packagename).unwrap()
-            };
-            package.install(dest).unwrap();
+        for (packagename, _package) in &config.packages {
+            println!("Installing package from remote: {}", packagename);
+            library
+                .install(vec![pkg::PackageName::new(packagename).unwrap()])
+                .unwrap();
         }
     }
+
+    library.apply().unwrap();
 }
 
 pub fn install_dir(
@@ -500,6 +463,13 @@ pub fn fetch_bootloaders(
 
     let mut bootloader_config = Config::default();
     bootloader_config.general = config.general.clone();
+    // Ensure a pkgar remote is available
+    FileConfig {
+        path: "/etc/pkg.d/50_redox".to_string(),
+        data: "https://static.redox-os.org/pkg".to_string(),
+        ..Default::default()
+    }
+    .create(&bootloader_dir)?;
     bootloader_config
         .packages
         .insert("bootloader".to_string(), PackageConfig::default());

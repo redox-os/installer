@@ -24,6 +24,6 @@ cargo build --release
 rm -f "${IMAGE}"
 fallocate -l 1GiB "${IMAGE}"
 
-target/release/redox_installer -c test.toml "${IMAGE}"
+target/release/redox_installer -c res/test.toml "${IMAGE}"
 
 qemu-system-x86_64 "${QEMU_ARGS[@]}" -drive "file=${IMAGE},format=raw"
