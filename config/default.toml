@@ -141,9 +141,7 @@ data = "https://static.redox-os.org/pkg"
 
 [[files]]
 path = "/etc/hostname"
-data = """
-redox
-"""
+data = "redox"
 
 [[files]]
 path = "/etc/issue"
