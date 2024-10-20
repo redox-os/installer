@@ -1,6 +1,6 @@
 [package]
 name = "redox_installer"
-version = "0.2.26"
+version = "0.2.27"
 description = "A Redox filesystem builder"
 license = "MIT"
 authors = ["Jeremy Soller <jackpot51@gmail.com>"]
@@ -32,7 +32,7 @@ fatfs = "0.3.0"
 fscommon = "0.1.1"
 gpt = "3.0.0"
 libc = "0.2.70"
-pkgar = "0.1.13"
+pkgar = "0.1.15"
 pkgar-core = "0.1.13"
 pkgar-keys = "0.1.13"
 rand = "0.8"
