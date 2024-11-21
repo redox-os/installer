@@ -68,7 +68,7 @@ fn main() {
         // List the packages that should be fetched or built by the cookbook
         for (packagename, package) in &config.packages {
             match package {
-                PackageConfig::Build(rule) if rule == "recipe" => {
+                PackageConfig::Build(rule) if rule == "recipe" || rule == "source" => {
                     println!("{}", packagename);
                 }
                 PackageConfig::Build(rule) if rule == "binary" => {
