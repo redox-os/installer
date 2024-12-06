@@ -20,7 +20,7 @@ use std::{
     collections::BTreeMap,
     env, fs,
     io::{self, Seek, SeekFrom, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process,
     rc::Rc,
     sync::mpsc::channel,
@@ -78,13 +78,32 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
     Ok(password.unwrap_or("".to_string()))
 }
 
-fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &str) {
+fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &str) -> Result<()> {
+    let head_path = PathBuf::from(format!("{dest}/pkg/{packagename}.pkgar_head"));
+
+    // Check if the package has been already installed. Maybe it was a runtime dependency of some
+    // other package.
+    if head_path.exists() {
+        return Ok(());
+    }
+
     let public_path = format!("{cookbook}/build/id_ed25519.pub.toml",);
     let pkgar_path = format!("{cookbook}/repo/{target}/{packagename}.pkgar");
-    pkgar::extract(&public_path, &pkgar_path, dest).unwrap();
 
-    let head_path = format!("{dest}/pkg/{packagename}.pkgar_head");
-    pkgar::split(&public_path, &pkgar_path, &head_path, Option::<&str>::None).unwrap();
+    pkgar::extract(&public_path, &pkgar_path, dest).unwrap();
+    pkgar::split(&public_path, &pkgar_path, head_path, Option::<&str>::None).unwrap();
+
+    let pkginfo_path = format!("{cookbook}/repo/{target}/{packagename}.toml");
+    let pkginfo = pkg::Package::from_toml(&fs::read_to_string(pkginfo_path)?)?;
+
+    // Recursively install any runtime dependencies.
+    for dep in pkginfo.depends.iter() {
+        let depname = dep.as_str();
+        println!("Installing runtime dependency for {packagename} from local repo: {depname}");
+        install_local_pkgar(cookbook, target, depname, dest)?;
+    }
+
+    Ok(())
 }
 
 //TODO: error handling
@@ -129,7 +148,7 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
                 }
                 Rule::Build => {
                     println!("Installing package from local repo: {}", packagename);
-                    install_local_pkgar(cookbook, target, packagename, dest);
+                    install_local_pkgar(cookbook, target, packagename, dest).unwrap();
                 }
             }
         }
