@@ -8,31 +8,24 @@ use std::{
     fs,
     io::{self, Read, Write},
     os::unix::fs::{symlink, MetadataExt, OpenOptionsExt},
-    path::Path,
+    path::{Path, PathBuf},
     process,
 };
 use termion::input::TermRead;
 
 #[cfg(not(target_os = "redox"))]
-fn disk_paths(_paths: &mut Vec<(String, u64)>) {}
+fn disk_paths(_paths: &mut Vec<(PathBuf, u64)>) {}
 
 #[cfg(target_os = "redox")]
-fn disk_paths(paths: &mut Vec<(String, u64)>) {
+fn disk_paths(paths: &mut Vec<(PathBuf, u64)>) {
     let mut schemes = Vec::new();
     match fs::read_dir("/scheme") {
         Ok(entries) => {
             for entry_res in entries {
                 if let Ok(entry) = entry_res {
-                    let path = entry.path();
-                    if let Ok(path_str) = path.into_os_string().into_string() {
-                        let scheme = path_str.trim_start_matches(':').trim_matches('/');
-                        if scheme.starts_with("disk") {
-                            if scheme == "disk/live" {
-                                // Skip live disks
-                                continue;
-                            }
-
-                            schemes.push(format!("{}:", scheme));
+                    if let Ok(file_name) = entry.file_name().into_string() {
+                        if file_name.starts_with("disk") {
+                            schemes.push(entry.path());
                         }
                     }
                 }
@@ -44,8 +37,7 @@ fn disk_paths(paths: &mut Vec<(String, u64)>) {
     }
 
     for scheme in schemes {
-        let is_dir = fs::metadata(&scheme).map(|x| x.is_dir()).unwrap_or(false);
-        if is_dir {
+        if scheme.is_dir() {
             match fs::read_dir(&scheme) {
                 Ok(entries) => {
                     for entry_res in entries {
@@ -56,12 +48,10 @@ fn disk_paths(paths: &mut Vec<(String, u64)>) {
                                     continue;
                                 }
 
-                                if let Ok(path) = entry.path().into_os_string().into_string() {
-                                    if let Ok(metadata) = entry.metadata() {
-                                        let size = metadata.len();
-                                        if size > 0 {
-                                            paths.push((path, size));
-                                        }
+                                if let Ok(metadata) = entry.metadata() {
+                                    let size = metadata.len();
+                                    if size > 0 {
+                                        paths.push((entry.path(), size));
                                     }
                                 }
                             }
@@ -69,7 +59,7 @@ fn disk_paths(paths: &mut Vec<(String, u64)>) {
                     }
                 }
                 Err(err) => {
-                    eprintln!("installer_tui: failed to list '{}': {}", scheme, err);
+                    eprintln!("installer_tui: failed to list '{}': {}", scheme.display(), err);
                 }
             }
         }
@@ -213,12 +203,12 @@ fn package_files(
     Ok(())
 }
 
-fn choose_disk() -> String {
+fn choose_disk() -> PathBuf {
     let mut paths = Vec::new();
     disk_paths(&mut paths);
     loop {
         for (i, (path, size)) in paths.iter().enumerate() {
-            eprintln!("\x1B[1m{}\x1B[0m: {}: {}", i + 1, path, format_size(*size));
+            eprintln!("\x1B[1m{}\x1B[0m: {}: {}", i + 1, path.display(), format_size(*size));
         }
 
         if paths.is_empty() {
