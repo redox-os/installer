@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-failure = "0.1.8"
+anyhow = "1"
 pkgar = "0.1.9"
 pkgar-core = "0.1.0"
 pkgar-keys = "0.1.0"

@@ -1,9 +1,9 @@
+use anyhow::format_err;
 use cosmic::iced::{
     self, executor, theme,
     widget::{button, column, horizontal_space, progress_bar, radio, row, text, vertical_space},
     window, Alignment, Application, Command, Element, Length, Settings, Size, Subscription, Theme,
 };
-use failure::format_err;
 use pkgar::{ext::EntryExt, PackageHead};
 use pkgar_core::PackageSrc;
 use pkgar_keys::PublicKeyFile;
@@ -105,7 +105,7 @@ fn format_size(size: u64) -> String {
     }
 }
 
-fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<(), failure::Error> {
+fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> anyhow::Result<()> {
     if let Some(parent) = dest.parent() {
         // Parent may be a symlink
         if ! parent.is_symlink() {
@@ -318,7 +318,7 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
     let res = with_whole_disk(
         &disk_path,
         &disk_option,
-        |mount_path| -> Result<(), failure::Error> {
+        |mount_path: &Path| -> anyhow::Result<()> {
             message!("Loading filesystem.toml");
             let mut config: Config = {
                 let path = root_path.join("filesystem.toml");
