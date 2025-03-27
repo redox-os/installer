@@ -5,6 +5,7 @@ pub struct GeneralConfig {
     pub repo_binary: Option<bool>,
     pub filesystem_size: Option<u32>,    //MiB
     pub efi_partition_size: Option<u32>, //MiB
+    pub skip_partitions: Option<bool>,
 }
 
 impl GeneralConfig {
@@ -13,5 +14,6 @@ impl GeneralConfig {
         self.repo_binary = other.repo_binary.or(self.repo_binary);
         self.filesystem_size = other.filesystem_size.or(self.filesystem_size);
         self.efi_partition_size = other.efi_partition_size.or(self.efi_partition_size);
+        self.skip_partitions = other.skip_partitions.or(self.skip_partitions);
     }
 }

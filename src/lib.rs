@@ -33,6 +33,7 @@ pub struct DiskOption<'a> {
     pub bootloader_efi: &'a [u8],
     pub password_opt: Option<&'a [u8]>,
     pub efi_partition_size: Option<u32>, //MiB
+    pub skip_partitions: bool,
 }
 
 fn get_target() -> String {
@@ -539,12 +540,24 @@ where
             bail!("target '{target}' not supported");
         }
     };
-
     // Open disk and read metadata
     eprintln!("Opening disk {}", disk_path.as_ref().display());
     let mut disk_file = DiskWrapper::open(disk_path.as_ref())?;
     let disk_size = disk_file.size();
     let block_size = disk_file.block_size() as u64;
+
+    if disk_option.skip_partitions {
+        return with_redoxfs(
+            DiskIo(fscommon::StreamSlice::new(
+                disk_file,
+                0,
+                disk_size.next_multiple_of(block_size),
+            )?),
+            disk_option.password_opt,
+            callback,
+        );
+    }
+
     let gpt_block_size = match block_size {
         512 => gpt::disk::LogicalBlockSize::Lb512,
         _ => {
@@ -711,6 +724,7 @@ fn install_inner(config: Config, output: &Path, cookbook: Option<&str>, live: bo
             bootloader_efi: &bootloader_efi,
             password_opt: None,
             efi_partition_size: config.general.efi_partition_size,
+            skip_partitions: config.general.skip_partitions.unwrap_or(false),
         };
         with_whole_disk(output, &disk_option, move |mount_path| {
             install_dir(config, mount_path, cookbook)
