@@ -1839,28 +1839,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "failure"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d32e9bd16cc02eae7db7ef620b392808b89f6a5e16bb3497d159c6b92a0f4f86"
-dependencies = [
- "backtrace",
- "failure_derive",
-]
-
-[[package]]
-name = "failure_derive"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa4da3c766cd7a0db8242e326e9e4e081edd567072893ed320008189715366a4"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
- "synstructure",
-]
-
-[[package]]
 name = "fast-srgb8"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3135,7 +3113,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e310b3a6b5907f99202fcdb4960ff45b93735d7c7d96b760fcff8db2dc0e103d"
 dependencies = [
  "cfg-if 1.0.0",
- "windows-targets 0.52.5",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -4358,7 +4336,7 @@ dependencies = [
 name = "redox_installer_gui"
 version = "0.1.0"
 dependencies = [
- "failure",
+ "anyhow",
  "libcosmic",
  "pkgar",
  "pkgar-core",
@@ -4567,14 +4545,14 @@ dependencies = [
 
 [[package]]
 name = "ring"
-version = "0.17.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7"
+version = "0.17.8"
+source = "git+https://gitlab.redox-os.org/redox-os/ring.git?branch=redox-0.17.8#fce20f12b6aad164a1a7e13ae1dcb46422b171c0"
 dependencies = [
  "cc",
  "cfg-if 1.0.0",
  "getrandom 0.2.15",
  "libc",
+ "spin",
  "untrusted",
  "windows-sys 0.52.0",
 ]
@@ -5219,18 +5197,6 @@ name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
-
-[[package]]
-name = "synstructure"
-version = "0.12.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f36bdaa60a83aca3921b5259d5400cbf5e90fc51931376a9bd4a0eb79aa7210f"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
- "unicode-xid",
-]
 
 [[package]]
 name = "sys-locale"
@@ -6892,8 +6858,3 @@ dependencies = [
  "quote",
  "syn 1.0.109",
 ]
-
-[[patch.unused]]
-name = "ring"
-version = "0.13.5"
-source = "git+https://gitlab.redox-os.org/redox-os/ring.git?branch=redox-unix-0.13.5#c7de589d11ffb1e97a8b7346fb6e662512c72e91"
