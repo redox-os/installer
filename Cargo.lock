@@ -4338,10 +4338,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "libcosmic",
+ "libredox 0.1.3",
  "pkgar",
  "pkgar-core",
  "pkgar-keys",
  "redox_installer",
+ "redox_syscall 0.5.2",
  "toml 0.5.11",
 ]
 

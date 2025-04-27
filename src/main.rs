@@ -1,7 +1,10 @@
 use anyhow::format_err;
 use cosmic::iced::{
     self, executor, theme,
-    widget::{button, column, horizontal_space, progress_bar, radio, row, text, vertical_space},
+    widget::{
+        button, column, horizontal_space, progress_bar, radio, row, text, text_input,
+        vertical_space,
+    },
     window, Alignment, Application, Command, Element, Length, Settings, Size, Subscription, Theme,
 };
 use pkgar::{ext::EntryExt, PackageHead};
@@ -24,22 +27,45 @@ fn main() -> iced::Result {
     Window::run(settings)
 }
 
+fn sudo(password: &str) -> Result<(), String> {
+    let file = libredox::call::open("/scheme/sudo", libredox::flag::O_CLOEXEC, 0)
+        .map_err(|err| err.to_string())?;
+
+    libredox::call::write(file, password.as_bytes()).map_err(|err| err.to_string())?;
+
+    // FIXME move to libredox
+    unsafe extern "C" {
+        safe fn redox_cur_procfd_v0() -> usize;
+    }
+
+    // Elevate privileges of our own process with help from the sudo daemon
+    syscall::sendfd(
+        file,
+        syscall::dup(redox_cur_procfd_v0(), &[]).map_err(|err| err.to_string())?,
+        0,
+        0,
+    )
+    .map_err(|err| err.to_string())?;
+
+    Ok(())
+}
+
 fn disk_paths() -> Result<Vec<(String, u64)>, String> {
     let mut schemes = Vec::new();
-    match fs::read_dir(":") {
+    match fs::read_dir("/scheme/") {
         Ok(entries) => {
             for entry_res in entries {
                 if let Ok(entry) = entry_res {
                     let path = entry.path();
                     if let Ok(path_str) = path.into_os_string().into_string() {
-                        let scheme = path_str.trim_start_matches(':').trim_matches('/');
+                        let scheme = path_str.trim_start_matches("/scheme/").trim_matches('/');
                         if scheme.starts_with("disk") {
                             if scheme == "disk/live" {
                                 // Skip live disks
                                 continue;
                             }
 
-                            schemes.push(format!("{}:", scheme));
+                            schemes.push(format!("/scheme/{}", scheme));
                         }
                     }
                 }
@@ -108,7 +134,7 @@ fn format_size(size: u64) -> String {
 fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> anyhow::Result<()> {
     if let Some(parent) = dest.parent() {
         // Parent may be a symlink
-        if ! parent.is_symlink() {
+        if !parent.is_symlink() {
             match fs::create_dir_all(&parent) {
                 Ok(()) => (),
                 Err(err) => {
@@ -390,6 +416,7 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
 
 #[derive(Debug)]
 enum Page {
+    Sudo(String),
     Disk(Option<usize>),
     Install(usize, String),
     Success(String),
@@ -406,6 +433,8 @@ struct Worker {
 enum Message {
     None,
     Worker(Worker),
+    SudoInput(String),
+    SudoSubmit,
     DiskChoose(usize),
     DiskConfirm(usize),
     Install(usize, String),
@@ -427,10 +456,15 @@ impl Application for Window {
     type Theme = Theme;
 
     fn new(_flags: ()) -> (Self, Command<Message>) {
-        //TODO: load in background
-        let (page, disk_paths) = match disk_paths() {
-            Ok(disk_paths) => (Page::Disk(None), disk_paths),
-            Err(err) => (Page::Error(err), Vec::new()),
+        let uid = libredox::call::geteuid().unwrap();
+        let (page, disk_paths) = if uid == 0 {
+            //TODO: load in background
+            match disk_paths() {
+                Ok(disk_paths) => (Page::Disk(None), disk_paths),
+                Err(err) => (Page::Error(err), Vec::new()),
+            }
+        } else {
+            (Page::Sudo(String::new()), Vec::new())
         };
 
         (
@@ -452,6 +486,27 @@ impl Application for Window {
             Message::None => {}
             Message::Worker(worker) => {
                 self.worker_opt = Some(worker);
+            }
+            Message::SudoInput(password) => {
+                self.page = Page::Sudo(password);
+            }
+            Message::SudoSubmit => {
+                if let Page::Sudo(password) = &self.page {
+                    //TODO: run async?
+                    match sudo(password) {
+                        Ok(()) => {
+                            (self.page, self.disk_paths) = match disk_paths() {
+                                Ok(disk_paths) => (Page::Disk(None), disk_paths),
+                                Err(err) => (Page::Error(err), Vec::new()),
+                            };
+                        }
+                        Err(err) => {
+                            //TODO: show error in GUI
+                            eprintln!("{err}");
+                            self.page = Page::Sudo(String::new());
+                        }
+                    }
+                }
             }
             Message::DiskChoose(disk_i) => {
                 self.page = Page::Disk(Some(disk_i));
@@ -496,6 +551,16 @@ impl Application for Window {
     fn view(&self) -> Element<Message> {
         let mut widgets = Vec::new();
         match &self.page {
+            Page::Sudo(password) => {
+                widgets.push(text("Enter your password:").into());
+                widgets.push(
+                    text_input("", password)
+                        .password()
+                        .on_input(Message::SudoInput)
+                        .on_submit(Message::SudoSubmit)
+                        .into(),
+                );
+            }
             Page::Disk(disk_i_opt) => {
                 if !self.disk_paths.is_empty() {
                     widgets.push(text("Choose a drive:").size(24).into());
