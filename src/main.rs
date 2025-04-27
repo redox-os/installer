@@ -340,6 +340,7 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
         bootloader_efi: &bootloader_efi,
         password_opt: password_opt.as_ref().map(|x| x.as_bytes()),
         efi_partition_size: None,
+        skip_partitions: false,
     };
     let res = with_whole_disk(
         &disk_path,
