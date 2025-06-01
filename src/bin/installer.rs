@@ -19,6 +19,7 @@ fn main() {
         .add_opt("b", "cookbook")
         .add_opt("c", "config")
         .add_opt("o", "output-config")
+        .add_opt("", "write-bootloader")
         .add_flag(&["filesystem-size"])
         .add_flag(&["r", "repo-binary"])
         .add_flag(&["l", "list-packages"])
@@ -143,9 +144,13 @@ fn main() {
         };
 
         if let Some(path) = parser.args.get(0) {
-            if let Err(err) =
-                redox_installer::install(config, path, cookbook.as_deref(), parser.found("live"))
-            {
+            if let Err(err) = redox_installer::install(
+                config,
+                path,
+                cookbook.as_deref(),
+                parser.found("live"),
+                parser.get_opt("write-bootloader").as_deref(),
+            ) {
                 writeln!(stderr, "installer: failed to install: {}", err).unwrap();
                 process::exit(1);
             }
