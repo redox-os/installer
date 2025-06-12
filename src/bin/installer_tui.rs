@@ -177,7 +177,7 @@ fn package_files(
     root_path: &Path,
     config: &mut Config,
     files: &mut Vec<String>,
-) -> Result<(), pkgar::Error> {
+) -> Result<(), anyhow::Error> {
     //TODO: Remove packages from config where all files are located (and have valid shasum?)
     config.packages.clear();
 
