@@ -712,13 +712,22 @@ where
     with_redoxfs(disk_redoxfs, disk_option.password_opt, callback)
 }
 
-fn install_inner(config: Config, output: &Path, cookbook: Option<&str>, live: bool) -> Result<()> {
+fn install_inner(
+    config: Config,
+    output: &Path,
+    cookbook: Option<&str>,
+    live: bool,
+    write_bootloader: Option<&str>,
+) -> Result<()> {
     println!("Install {config:#?} to {}", output.display());
 
     if output.is_dir() {
         install_dir(config, output, cookbook)
     } else {
         let (bootloader_bios, bootloader_efi) = fetch_bootloaders(&config, cookbook, live)?;
+        if let Some(write_bootloader) = write_bootloader {
+            std::fs::write(write_bootloader, &bootloader_efi).unwrap();
+        }
         let disk_option = DiskOption {
             bootloader_bios: &bootloader_bios,
             bootloader_efi: &bootloader_efi,
@@ -736,6 +745,7 @@ pub fn install(
     output: impl AsRef<Path>,
     cookbook: Option<&str>,
     live: bool,
+    write_bootloader: Option<&str>,
 ) -> Result<()> {
-    install_inner(config, output.as_ref(), cookbook, live)
+    install_inner(config, output.as_ref(), cookbook, live, write_bootloader)
 }

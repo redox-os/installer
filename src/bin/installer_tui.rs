@@ -59,7 +59,11 @@ fn disk_paths(paths: &mut Vec<(PathBuf, u64)>) {
                     }
                 }
                 Err(err) => {
-                    eprintln!("installer_tui: failed to list '{}': {}", scheme.display(), err);
+                    eprintln!(
+                        "installer_tui: failed to list '{}': {}",
+                        scheme.display(),
+                        err
+                    );
                 }
             }
         }
@@ -208,7 +212,12 @@ fn choose_disk() -> PathBuf {
     disk_paths(&mut paths);
     loop {
         for (i, (path, size)) in paths.iter().enumerate() {
-            eprintln!("\x1B[1m{}\x1B[0m: {}: {}", i + 1, path.display(), format_size(*size));
+            eprintln!(
+                "\x1B[1m{}\x1B[0m: {}: {}",
+                i + 1,
+                path.display(),
+                format_size(*size)
+            );
         }
 
         if paths.is_empty() {
