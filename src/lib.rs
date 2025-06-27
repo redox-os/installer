@@ -124,6 +124,7 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
             enum Rule {
                 RemotePrebuilt,
                 Build,
+                Ignore,
             }
 
             let rule = match (config.general.repo_binary, package) {
@@ -137,6 +138,7 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
                     },
                 ) => Rule::RemotePrebuilt,
                 (_, PackageConfig::Build(rule)) if rule == "binary" => Rule::RemotePrebuilt,
+                (_, PackageConfig::Build(rule)) if rule == "ignore" => Rule::Ignore,
                 _ => Rule::Build,
             };
 
@@ -150,6 +152,9 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
                 Rule::Build => {
                     println!("Installing package from local repo: {}", packagename);
                     install_local_pkgar(cookbook, target, packagename, dest).unwrap();
+                }
+                Rule::Ignore => {
+                    // do nothing, not even logging it
                 }
             }
         }

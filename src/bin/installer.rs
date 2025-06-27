@@ -72,7 +72,7 @@ fn main() {
                 PackageConfig::Build(rule) if rule == "recipe" || rule == "source" => {
                     println!("{}", packagename);
                 }
-                PackageConfig::Build(rule) if rule == "binary" => {
+                PackageConfig::Build(rule) if rule == "binary" || rule == "ignore" => {
                     // skip this package
                 }
                 _ => {
