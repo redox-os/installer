@@ -45,7 +45,7 @@ fn get_target() -> String {
 /// Converts a password to a serialized argon2rs hash, understandable
 /// by redox_users. If the password is blank, the hash is blank.
 fn hash_password(password: &str) -> Result<String> {
-    if password != "" {
+    if !password.is_empty() {
         let salt = format!("{:X}", OsRng.next_u64());
         let config = argon2::Config::default();
         let hash = argon2::hash_encoded(password.as_bytes(), salt.as_bytes(), &config)?;
@@ -159,7 +159,7 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
             }
         }
     } else {
-        for (packagename, _package) in &config.packages {
+        for packagename in config.packages.keys() {
             println!("Installing package from remote: {}", packagename);
             library
                 .install(vec![pkg::PackageName::new(packagename).unwrap()])
@@ -422,10 +422,8 @@ where
         format!("/tmp/redox_installer_{}", process::id())
     };
 
-    if cfg!(not(target_os = "redox")) {
-        if !Path::new(&mount_path).exists() {
-            fs::create_dir(&mount_path)?;
-        }
+    if cfg!(not(target_os = "redox")) && !Path::new(&mount_path).exists() {
+        fs::create_dir(&mount_path)?;
     }
 
     let ctime = SystemTime::now().duration_since(UNIX_EPOCH)?;
