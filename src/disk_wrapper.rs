@@ -70,7 +70,7 @@ impl DiskWrapper {
                 remaining,
                 self.block
                     .len()
-                    .checked_sub(offset.try_into().unwrap())
+                    .checked_sub(offset)
                     .unwrap(),
             );
 

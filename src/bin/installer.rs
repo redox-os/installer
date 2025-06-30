@@ -98,7 +98,7 @@ fn main() {
                 Ok(data) => {
                     config.files.push(redox_installer::FileConfig {
                         path: "pkg/id_ed25519.pub.toml".to_string(),
-                        data: data,
+                        data,
                         ..Default::default()
                     });
                     Some(path)
@@ -143,7 +143,7 @@ fn main() {
             None
         };
 
-        if let Some(path) = parser.args.get(0) {
+        if let Some(path) = parser.args.first() {
             if let Err(err) = redox_installer::install(
                 config,
                 path,
