@@ -9,7 +9,7 @@ libredox = "0.1"
 pkgar = "0.1.9"
 pkgar-core = "0.1.0"
 pkgar-keys = "0.1.0"
-redox_installer = "0.2.30"
+redox_installer = "0.2.34"
 redox_syscall = "0.5"
 toml = "0.5.6"
 
