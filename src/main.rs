@@ -292,7 +292,7 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
         }}
     }
 
-    let root_path = Path::new("file:");
+    let root_path = Path::new("/scheme/file/");
 
     message!("Loading bootloader");
     let bootloader_bios = {
