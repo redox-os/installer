@@ -1,0 +1,37 @@
+image: "rust:latest"
+
+stages:
+  - lint
+  - build
+  - test
+
+variables:
+  GIT_SUBMODULE_STRATEGY: "recursive"
+
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
+
+fmt:
+  stage: lint
+  script:
+    - rustup component add rustfmt
+    - cargo fmt -- --check
+
+cargo-build:
+  stage: build
+  script:
+    - apt update && apt install -y fuse3 libfuse3-dev
+    - cargo build --locked
+
+cargo-test:
+  stage: test
+  script:
+    - cargo test
+
+installer-test:
+  stage: test
+  script:
+    - fallocate -l 256MiB test.bin
+    - ./target/debug/redox_installer -c res/test.toml test.bin
