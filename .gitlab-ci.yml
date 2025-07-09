@@ -2,7 +2,6 @@ image: "rust:latest"
 
 stages:
   - lint
-  - build
   - test
 
 workflow:
@@ -16,23 +15,13 @@ fmt:
     - rustup component add rustfmt
     - cargo fmt -- --check
 
-cargo-build:
-  stage: build
-  script:
-    - apt update && apt install -y fuse3 libfuse3-dev
-    - cargo build --locked
-
 cargo-test:
   stage: test
   dependencies:
     - cargo-build
   script:
+    - apt update && apt install -y fuse3 libfuse3-dev
+    - cargo build --locked
     - cargo test
-
-installer-test:
-  stage: test
-  dependencies:
-    - cargo-build
-  script:
     - fallocate -l 256MiB test.bin
     - ./target/debug/redox_installer -c res/test.toml test.bin
