@@ -17,8 +17,6 @@ fmt:
 
 cargo-test:
   stage: test
-  dependencies:
-    - cargo-build
   script:
     - apt update && apt install -y fuse3 libfuse3-dev
     - cargo build --locked
