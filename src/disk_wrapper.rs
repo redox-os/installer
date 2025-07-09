@@ -66,13 +66,7 @@ impl DiskWrapper {
             let block = self.seek / block_len;
             let offset: usize = (self.seek % block_len).try_into().unwrap();
             let remaining = buf_len.checked_sub(i).unwrap();
-            let len = cmp::min(
-                remaining,
-                self.block
-                    .len()
-                    .checked_sub(offset)
-                    .unwrap(),
-            );
+            let len = cmp::min(remaining, self.block.len().checked_sub(offset).unwrap());
 
             self.disk
                 .seek(SeekFrom::Start(block.checked_mul(block_len).unwrap()))?;
