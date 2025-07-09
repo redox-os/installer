@@ -24,11 +24,15 @@ cargo-build:
 
 cargo-test:
   stage: test
+  dependencies:
+    - cargo-build
   script:
     - cargo test
 
 installer-test:
   stage: test
+  dependencies:
+    - cargo-build
   script:
     - fallocate -l 256MiB test.bin
     - ./target/debug/redox_installer -c res/test.toml test.bin
