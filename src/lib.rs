@@ -91,11 +91,13 @@ fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &s
     let public_path = format!("{cookbook}/build/id_ed25519.pub.toml",);
     let pkgar_path = format!("{cookbook}/repo/{target}/{packagename}.pkgar");
 
-    pkgar::extract(&public_path, &pkgar_path, dest).unwrap();
-    pkgar::split(&public_path, &pkgar_path, head_path, Option::<&str>::None).unwrap();
-
     let pkginfo_path = format!("{cookbook}/repo/{target}/{packagename}.toml");
     let pkginfo = pkg::Package::from_toml(&fs::read_to_string(pkginfo_path)?)?;
+
+    if pkginfo.version != "" {
+        pkgar::extract(&public_path, &pkgar_path, dest).unwrap();
+        pkgar::split(&public_path, &pkgar_path, head_path, Option::<&str>::None).unwrap();
+    }
 
     // Recursively install any runtime dependencies.
     for dep in pkginfo.depends.iter() {
