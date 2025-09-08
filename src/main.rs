@@ -1,11 +1,11 @@
 use anyhow::format_err;
-use cosmic::iced::{
-    self, executor, theme,
+use cosmic::{
+    app::{self, Task},
+    iced::{self, executor, widget::row, window, Alignment, Size, Subscription, futures::sink::SinkExt, stream},
     widget::{
-        button, column, horizontal_space, progress_bar, radio, row, text, text_input,
-        vertical_space,
+        button, column, horizontal_space, progress_bar, radio, text, text_input, vertical_space,
     },
-    window, Alignment, Application, Command, Element, Length, Settings, Size, Subscription, Theme,
+    Application, ApplicationExt, Core, Element,
 };
 use pkgar::{ext::EntryExt, PackageHead};
 use pkgar_core::PackageSrc;
@@ -21,10 +21,10 @@ use std::{
 };
 
 fn main() -> iced::Result {
-    let mut settings = Settings::default();
-    settings.window.size = Size::new(608.0, 416.0);
-    settings.exit_on_close_request = false;
-    Window::run(settings)
+    let mut settings = app::Settings::default();
+    settings = settings.size(Size::new(608.0, 416.0));
+    settings = settings.exit_on_close(false);
+    app::run::<Window>(settings, ())
 }
 
 fn sudo(password: &str) -> Result<(), String> {
@@ -445,6 +445,7 @@ enum Message {
 }
 
 struct Window {
+    core: Core,
     page: Page,
     disk_paths: Vec<(String, u64)>,
     worker_opt: Option<Worker>,
@@ -454,9 +455,10 @@ impl Application for Window {
     type Executor = executor::Default;
     type Flags = ();
     type Message = Message;
-    type Theme = Theme;
 
-    fn new(_flags: ()) -> (Self, Command<Message>) {
+    const APP_ID: &'static str = "org.redox-os.InstallerGui";
+
+    fn init(core: Core, _flags: ()) -> (Self, Task<Message>) {
         let uid = libredox::call::geteuid().unwrap();
         let (page, disk_paths) = if uid == 0 {
             //TODO: load in background
@@ -468,21 +470,25 @@ impl Application for Window {
             (Page::Sudo(String::new()), Vec::new())
         };
 
-        (
-            Self {
-                page,
-                disk_paths,
-                worker_opt: None,
-            },
-            Command::none(),
-        )
+        let mut app = Self {
+            core,
+            page,
+            disk_paths,
+            worker_opt: None,
+        };
+        let task = app.set_window_title("Redox OS Installer".to_string());
+        (app, task)
     }
 
-    fn title(&self) -> String {
-        String::from("Redox OS Installer")
+    fn core(&self) -> &Core {
+        &self.core
     }
 
-    fn update(&mut self, message: Message) -> Command<Message> {
+    fn core_mut(&mut self) -> &mut Core {
+        &mut self.core
+    }
+
+    fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::None => {}
             Message::Worker(worker) => {
@@ -543,10 +549,12 @@ impl Application for Window {
                     let join_handle = Arc::try_unwrap(worker.join_handle).unwrap();
                     join_handle.join().unwrap();
                 }
-                return window::close(window::Id::MAIN);
+                if let Some(window_id) = self.core.main_window_id() {
+                    return window::close(window_id);
+                }
             }
         }
-        Command::none()
+        Task::none()
     }
 
     fn view(&self) -> Element<Message> {
@@ -558,7 +566,7 @@ impl Application for Window {
                     text_input("", password)
                         .password()
                         .on_input(Message::SudoInput)
-                        .on_submit(Message::SudoSubmit)
+                        .on_submit(|_| Message::SudoSubmit)
                         .into(),
                 );
             }
@@ -569,8 +577,8 @@ impl Application for Window {
                     for (disk_i, (disk_path, disk_size)) in self.disk_paths.iter().enumerate() {
                         widgets.push(
                             row![
-                                radio(disk_path, disk_i, *disk_i_opt, Message::DiskChoose),
-                                horizontal_space(Length::Fill),
+                                radio(text(disk_path), disk_i, *disk_i_opt, Message::DiskChoose),
+                                horizontal_space(),
                                 text(format_size(*disk_size)),
                             ]
                             .into(),
@@ -578,12 +586,11 @@ impl Application for Window {
                     }
 
                     if let Some(disk_i) = *disk_i_opt {
-                        widgets.push(vertical_space(Length::Fill).into());
+                        widgets.push(vertical_space().into());
                         widgets.push(
                             row![
-                                horizontal_space(Length::Fill),
-                                button("Confirm")
-                                    .style(theme::Button::Destructive)
+                                horizontal_space(),
+                                button::destructive("Confirm")
                                     .on_press(Message::DiskConfirm(disk_i)),
                             ]
                             .into(),
@@ -601,11 +608,11 @@ impl Application for Window {
             Page::Success(description) => {
                 widgets.push(text("Installation complete!").size(24).into());
                 widgets.push(text(description).into());
-                widgets.push(vertical_space(Length::Fill).into());
+                widgets.push(vertical_space().into());
                 widgets.push(
                     row![
-                        horizontal_space(Length::Fill),
-                        button("Exit").on_press(Message::Exit),
+                        horizontal_space(),
+                        button::standard("Exit").on_press(Message::Exit),
                     ]
                     .into(),
                 );
@@ -615,15 +622,11 @@ impl Application for Window {
             }
         };
 
-        column(widgets)
+        column::with_children(widgets)
             .spacing(8)
             .padding(24)
-            .align_items(Alignment::Start)
+            .align_x(Alignment::Start)
             .into()
-    }
-
-    fn theme(&self) -> Theme {
-        Theme::Dark
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -633,44 +636,48 @@ impl Application for Window {
             Finished,
         }
 
-        iced::subscription::unfold(
+        Subscription::run_with_id(
             std::any::TypeId::of::<Worker>(),
-            State::Ready,
-            |state| async move {
-                match state {
-                    State::Ready => {
-                        let (command_sender, command_receiver) = std::sync::mpsc::channel();
+            stream::channel(100, |mut output| async move {
+                let mut state = State::Ready;
+                loop {
+                    let (message, new_state) = match state {
+                        State::Ready => {
+                            let (command_sender, command_receiver) = std::sync::mpsc::channel();
 
-                        let (message_sender, message_receiver) =
-                            iced::futures::channel::mpsc::unbounded();
+                            let (message_sender, message_receiver) =
+                                iced::futures::channel::mpsc::unbounded();
 
-                        //TODO: kill worker thread?
-                        let join_handle = std::thread::spawn(move || {
-                            while let Ok((disk_path, password_opt)) = command_receiver.recv() {
-                                println!("Installing to {:?}", disk_path);
-                                install(disk_path, password_opt, |message| {
-                                    message_sender.unbounded_send(message).unwrap();
-                                });
-                            }
-                        });
+                            //TODO: kill worker thread?
+                            let join_handle = std::thread::spawn(move || {
+                                while let Ok((disk_path, password_opt)) = command_receiver.recv() {
+                                    println!("Installing to {:?}", disk_path);
+                                    install(disk_path, password_opt, |message| {
+                                        message_sender.unbounded_send(message).unwrap();
+                                    });
+                                }
+                            });
 
-                        let worker = Worker {
-                            command_sender,
-                            join_handle: Arc::new(join_handle),
-                        };
+                            let worker = Worker {
+                                command_sender,
+                                join_handle: Arc::new(join_handle),
+                            };
 
-                        (Message::Worker(worker), State::Waiting(message_receiver))
-                    }
-                    State::Waiting(mut message_receiver) => {
-                        use iced::futures::StreamExt;
-                        match message_receiver.next().await {
-                            Some(message) => (message, State::Waiting(message_receiver)),
-                            None => (Message::None, State::Finished),
+                            (Message::Worker(worker), State::Waiting(message_receiver))
                         }
-                    }
-                    State::Finished => iced::futures::future::pending().await,
+                        State::Waiting(mut message_receiver) => {
+                            use iced::futures::StreamExt;
+                            match message_receiver.next().await {
+                                Some(message) => (message, State::Waiting(message_receiver)),
+                                None => (Message::None, State::Finished),
+                            }
+                        }
+                        State::Finished => iced::futures::future::pending().await,
+                    };
+                    output.send(message).await.unwrap();
+                    state = new_state;
                 }
-            },
+            })
         )
     }
 }
