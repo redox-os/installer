@@ -1,6 +1,6 @@
 [package]
 name = "redox_installer"
-version = "0.2.34"
+version = "0.2.35"
 description = "A Redox filesystem builder"
 license = "MIT"
 authors = ["Jeremy Soller <jackpot51@gmail.com>"]
@@ -41,7 +41,7 @@ redox-pkg = { version = "0.2.5", features = ["indicatif"] }
 redox_syscall = "0.5.2"
 redoxfs = "0.7.0"
 rust-argon2 = "0.8.2"
-serde = "=1.0.197"
+serde = "1"
 serde_derive = "1.0.110"
 termion = "4"
 toml = "0.8"
