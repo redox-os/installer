@@ -204,10 +204,18 @@ pub fn install_dir(
 
     let output_dir = output_dir.to_owned();
 
+    for file in &config.files {
+        if !file.postinstall {
+            file.create(&output_dir)?;
+        }
+    }
+
     install_packages(&config, output_dir.to_str().unwrap(), cookbook);
 
     for file in &config.files {
-        file.create(&output_dir)?;
+        if file.postinstall {
+            file.create(&output_dir)?;
+        }
     }
 
     let mut passwd = String::new();
