@@ -271,17 +271,9 @@ pub fn install_dir(
         println!("\tHome: {home}");
         println!("\tShell: {shell}");
 
-        FileConfig {
-            path: home.clone(),
-            data: String::new(),
-            symlink: false,
-            directory: true,
-            mode: Some(0o0700),
-            uid: Some(uid),
-            gid: Some(gid),
-            recursive_chown: true,
-        }
-        .create(&output_dir)?;
+        FileConfig::new_directory(home.clone())
+            .with_recursive_mod(0o777, uid, gid)
+            .create(&output_dir)?;
 
         if uid >= 1000 {
             // Create XDG user dirs
@@ -301,21 +293,14 @@ pub fn install_dir(
                 ".local/share/Trash",
                 ".local/share/Trash/info",
             ] {
-                FileConfig {
-                    path: format!("{}/{}", home, xdg_folder),
-                    data: String::new(),
-                    symlink: false,
-                    directory: true,
-                    mode: Some(0o0700),
-                    uid: Some(uid),
-                    gid: Some(gid),
-                    recursive_chown: false,
-                }
-                .create(&output_dir)?;
+                FileConfig::new_directory(format!("{}/{}", home, xdg_folder))
+                    .with_mod(0o0700, uid, gid)
+                    .create(&output_dir)?;
             }
-            FileConfig {
-                path: format!("{}/.config/user-dirs.dirs", home),
-                data: r#"# Produced by redox installer
+
+            FileConfig::new_file(
+                format!("{}/.config/user-dirs.dirs", home),
+                r#"# Produced by redox installer
 XDG_DESKTOP_DIR="$HOME/Desktop"
 XDG_DOCUMENTS_DIR="$HOME/Documents"
 XDG_DOWNLOAD_DIR="$HOME/Downloads"
@@ -326,13 +311,8 @@ XDG_TEMPLATES_DIR="$HOME/Templates"
 XDG_VIDEOS_DIR="$HOME/Videos"
 "#
                 .to_string(),
-                symlink: false,
-                directory: false,
-                mode: Some(0o0600),
-                uid: Some(uid),
-                gid: Some(gid),
-                recursive_chown: false,
-            }
+            )
+            .with_mod(0o0600, uid, gid)
             .create(&output_dir)?;
         }
 
@@ -356,32 +336,13 @@ XDG_VIDEOS_DIR="$HOME/Videos"
     }
 
     if !passwd.is_empty() {
-        FileConfig {
-            path: "/etc/passwd".to_string(),
-            data: passwd,
-            symlink: false,
-            directory: false,
-            // Take defaults
-            mode: None,
-            uid: None,
-            gid: None,
-            recursive_chown: false,
-        }
-        .create(&output_dir)?;
+        FileConfig::new_file("/etc/passwd".to_string(), passwd).create(&output_dir)?;
     }
 
     if !shadow.is_empty() {
-        FileConfig {
-            path: "/etc/shadow".to_string(),
-            data: shadow,
-            symlink: false,
-            directory: false,
-            mode: Some(0o0600),
-            uid: Some(0),
-            gid: Some(0),
-            recursive_chown: false,
-        }
-        .create(&output_dir)?;
+        FileConfig::new_file("/etc/shadow".to_string(), shadow)
+            .with_mod(0o0600, 0, 0)
+            .create(&output_dir)?;
     }
 
     if !groups.is_empty() {
@@ -396,18 +357,9 @@ XDG_VIDEOS_DIR="$HOME/Videos"
             println!("\tMembers: {}", members.join(", "));
         }
 
-        FileConfig {
-            path: "/etc/group".to_string(),
-            data: groups_data,
-            symlink: false,
-            directory: false,
-            // Take defaults
-            mode: None,
-            uid: None,
-            gid: None,
-            recursive_chown: false,
-        }
-        .create(&output_dir)?;
+        FileConfig::new_file("/etc/group".to_string(), groups_data)
+            .with_mod(0o0600, 0, 0)
+            .create(&output_dir)?;
     }
 
     Ok(())
