@@ -204,11 +204,11 @@ pub fn install_dir(
 
     let output_dir = output_dir.to_owned();
 
+    install_packages(&config, output_dir.to_str().unwrap(), cookbook);
+
     for file in &config.files {
         file.create(&output_dir)?;
     }
-
-    install_packages(&config, output_dir.to_str().unwrap(), cookbook);
 
     let mut passwd = String::new();
     let mut shadow = String::new();
