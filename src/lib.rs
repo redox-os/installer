@@ -9,7 +9,7 @@ pub use crate::config::package::PackageConfig;
 pub use crate::config::Config;
 use crate::disk_wrapper::DiskWrapper;
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use pkg::Library;
 use rand::{rngs::OsRng, RngCore};
 use redoxfs::{unmount_path, Disk, DiskIo, FileSystem};
@@ -376,6 +376,17 @@ XDG_VIDEOS_DIR="$HOME/Videos"
 pub fn with_redoxfs<D, T, F>(disk: D, password_opt: Option<&[u8]>, callback: F) -> Result<T>
 where
     D: Disk + Send + 'static,
+    F: FnOnce(FileSystem<D>) -> Result<T>,
+{
+    let ctime = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let fs = FileSystem::create(disk, password_opt, ctime.as_secs(), ctime.subsec_nanos())
+        .map_err(syscall_error)?;
+    callback(fs)
+}
+
+pub fn with_redoxfs_mount<D, T, F>(fs: FileSystem<D>, callback: F) -> Result<T>
+where
+    D: Disk + Send + 'static,
     F: FnOnce(&Path) -> Result<T>,
 {
     let mount_path = if cfg!(target_os = "redox") {
@@ -387,10 +398,6 @@ where
     if cfg!(not(target_os = "redox")) && !Path::new(&mount_path).exists() {
         fs::create_dir(&mount_path)?;
     }
-
-    let ctime = SystemTime::now().duration_since(UNIX_EPOCH)?;
-    let fs = FileSystem::create(disk, password_opt, ctime.as_secs(), ctime.subsec_nanos())
-        .map_err(syscall_error)?;
 
     let (tx, rx) = channel();
     let join_handle = {
@@ -492,7 +499,7 @@ pub fn fetch_bootloaders(
 pub fn with_whole_disk<P, F, T>(disk_path: P, disk_option: &DiskOption, callback: F) -> Result<T>
 where
     P: AsRef<Path>,
-    F: FnOnce(&Path) -> Result<T>,
+    F: FnOnce(FileSystem<DiskIo<fscommon::StreamSlice<DiskWrapper>>>) -> Result<T>,
 {
     let target = get_target();
 
@@ -677,6 +684,84 @@ where
     with_redoxfs(disk_redoxfs, disk_option.password_opt, callback)
 }
 
+/// Try fast install using live disk memory
+pub fn try_fast_install<D: redoxfs::Disk, F: FnMut(u64, u64)>(
+    fs: &mut redoxfs::FileSystem<D>,
+    mut progress: F,
+) -> Result<bool> {
+    use libredox::{call::MmapArgs, flag};
+    use std::os::fd::AsRawFd;
+    use syscall::PAGE_SIZE;
+
+    let phys = env::var("DISK_LIVE_ADDR")
+        .ok()
+        .and_then(|x| usize::from_str_radix(&x, 16).ok())
+        .unwrap_or(0);
+    let size = env::var("DISK_LIVE_SIZE")
+        .ok()
+        .and_then(|x| usize::from_str_radix(&x, 16).ok())
+        .unwrap_or(0);
+    if phys == 0 || size == 0 {
+        return Ok(false);
+    }
+
+    let start = (phys / PAGE_SIZE) * PAGE_SIZE;
+    let end = phys
+        .checked_add(size)
+        .context("phys + size overflow")?
+        .next_multiple_of(PAGE_SIZE);
+    let size = end - start;
+
+    let original = unsafe {
+        //TODO: unmap this memory
+        let file = fs::File::open("/scheme/memory/physical")?;
+        let base = libredox::call::mmap(MmapArgs {
+            fd: file.as_raw_fd() as usize,
+            addr: core::ptr::null_mut(),
+            offset: start as u64,
+            length: size,
+            prot: flag::PROT_READ,
+            flags: flag::MAP_SHARED,
+        })
+        .map_err(|err| anyhow!("failed to mmap livedisk: {}", err))?;
+
+        std::slice::from_raw_parts(base as *const u8, size)
+    };
+
+    struct DiskLive {
+        original: &'static [u8],
+    }
+
+    impl redoxfs::Disk for DiskLive {
+        unsafe fn read_at(&mut self, block: u64, buffer: &mut [u8]) -> syscall::Result<usize> {
+            let offset = (block * redoxfs::BLOCK_SIZE) as usize;
+            if offset + buffer.len() > self.original.len() {
+                return Err(syscall::Error::new(syscall::EINVAL));
+            }
+            buffer.copy_from_slice(&self.original[offset..offset + buffer.len()]);
+            Ok(buffer.len())
+        }
+
+        unsafe fn write_at(&mut self, _block: u64, _buffer: &[u8]) -> syscall::Result<usize> {
+            Err(syscall::Error::new(syscall::EINVAL))
+        }
+
+        fn size(&mut self) -> syscall::Result<u64> {
+            Ok(self.original.len() as u64)
+        }
+    }
+
+    let mut fs_old = redoxfs::FileSystem::open(DiskLive { original }, None, None, false)?;
+    let size_old = fs_old.header.size();
+    let free_old = fs_old.allocator().free() * redoxfs::BLOCK_SIZE;
+    let used_old = size_old - free_old;
+    redoxfs::clone(&mut fs_old, fs, move |used| {
+        progress(used, used_old);
+    })?;
+
+    Ok(true)
+}
+
 fn install_inner(
     config: Config,
     output: &Path,
@@ -700,8 +785,10 @@ fn install_inner(
             efi_partition_size: config.general.efi_partition_size,
             skip_partitions: config.general.skip_partitions.unwrap_or(false),
         };
-        with_whole_disk(output, &disk_option, move |mount_path| {
-            install_dir(config, mount_path, cookbook)
+        with_whole_disk(output, &disk_option, move |fs| {
+            with_redoxfs_mount(fs, move |mount_path| {
+                install_dir(config, mount_path, cookbook)
+            })
         })
     }
 }

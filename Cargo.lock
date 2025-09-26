@@ -1685,7 +1685,7 @@ dependencies = [
 
 [[package]]
 name = "redox_installer"
-version = "0.2.36"
+version = "0.2.37"
 dependencies = [
  "anyhow",
  "arg_parser",
@@ -1694,6 +1694,7 @@ dependencies = [
  "fscommon",
  "gpt",
  "libc",
+ "libredox",
  "pkgar",
  "pkgar-core",
  "pkgar-keys",

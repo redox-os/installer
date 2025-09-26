@@ -1,9 +1,10 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use pkgar::{ext::EntryExt, PackageHead};
 use pkgar_core::PackageSrc;
 use pkgar_keys::PublicKeyFile;
-use redox_installer::{with_whole_disk, Config, DiskOption};
+use redox_installer::{try_fast_install, with_redoxfs_mount, with_whole_disk, Config, DiskOption};
 use std::{
+    env,
     ffi::OsStr,
     fs,
     io::{self, Read, Write},
@@ -279,6 +280,8 @@ fn main() {
 
     let password_opt = choose_password();
 
+    let instant = std::time::Instant::now();
+
     let bootloader_bios = {
         let path = root_path.join("boot").join("bootloader.bios");
         if path.exists() {
@@ -316,45 +319,69 @@ fn main() {
         efi_partition_size: None,
         skip_partitions: false, // TODO?
     };
-    let res = with_whole_disk(&disk_path, &disk_option, |mount_path| -> Result<()> {
-        let mut config: Config = Config::from_file(&root_path.join("filesystem.toml"))?;
-
-        // Copy filesystem.toml, which is not packaged
-        let mut files = vec!["filesystem.toml".to_string()];
-
-        // Copy files from locally installed packages
-        package_files(&root_path, &mut config, &mut files)
-            // TODO: implement Error trait
-            .map_err(|err| anyhow!("failed to read package files: {err}"))?;
-
-        // Perform config install (after packages have been converted to files)
-        eprintln!("configuring system");
-        let cookbook: Option<&'static str> = None;
-        redox_installer::install_dir(config, mount_path, cookbook)
-            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
-
-        // Sort and remove duplicates
-        files.sort();
-        files.dedup();
-
-        // Install files
-        let mut buf = vec![0; 4 * MIB as usize];
-        for (i, name) in files.iter().enumerate() {
-            eprintln!("copy {} [{}/{}]", name, i, files.len());
-
-            let src = root_path.join(name);
-            let dest = mount_path.join(name);
-            copy_file(&src, &dest, &mut buf)?;
+    let res = with_whole_disk(&disk_path, &disk_option, |mut fs| {
+        // Fast install method via filesystem clone
+        let mut last_percent = 0;
+        if try_fast_install(&mut fs, move |used, used_old| {
+            let percent = (used * 100) / used_old;
+            if percent != last_percent {
+                eprint!(
+                    "\r{}%: {} MB/{} MB",
+                    percent,
+                    used / 1000 / 1000,
+                    used_old / 1000 / 1000
+                );
+                last_percent = percent;
+            }
+        })? {
+            eprintln!("\rfinished installing using fast mode");
+            return Ok(());
         }
 
-        eprintln!("finished installing, unmounting filesystem");
+        // Slow install method via file copy
+        with_redoxfs_mount(fs, |mount_path| {
+            let mut config: Config = Config::from_file(&root_path.join("filesystem.toml"))?;
 
-        Ok(())
+            // Copy filesystem.toml, which is not packaged
+            let mut files = vec!["filesystem.toml".to_string()];
+
+            // Copy files from locally installed packages
+            package_files(&root_path, &mut config, &mut files)
+                // TODO: implement Error trait
+                .map_err(|err| anyhow!("failed to read package files: {err}"))?;
+
+            // Perform config install (after packages have been converted to files)
+            eprintln!("configuring system");
+            let cookbook: Option<&'static str> = None;
+            redox_installer::install_dir(config, mount_path, cookbook)
+                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+
+            // Sort and remove duplicates
+            files.sort();
+            files.dedup();
+
+            // Install files
+            let mut buf = vec![0; 4 * MIB as usize];
+            for (i, name) in files.iter().enumerate() {
+                eprintln!("copy {} [{}/{}]", name, i, files.len());
+
+                let src = root_path.join(name);
+                let dest = mount_path.join(name);
+                copy_file(&src, &dest, &mut buf)?;
+            }
+
+            eprintln!("finished installing, unmounting filesystem");
+
+            Ok(())
+        })
     });
 
     match res {
         Ok(()) => {
-            eprintln!("installer_tui: installed successfully");
+            eprintln!(
+                "installer_tui: installed successfully in {:?}",
+                instant.elapsed()
+            );
             process::exit(0);
         }
         Err(err) => {
