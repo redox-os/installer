@@ -1,7 +1,10 @@
 use anyhow::format_err;
 use cosmic::{
     app::{self, Task},
-    iced::{self, executor, widget::row, window, Alignment, Size, Subscription, futures::sink::SinkExt, stream},
+    iced::{
+        self, executor, futures::sink::SinkExt, stream, widget::row, window, Alignment, Size,
+        Subscription,
+    },
     widget::{
         button, column, horizontal_space, progress_bar, radio, text, text_input, vertical_space,
     },
@@ -10,7 +13,7 @@ use cosmic::{
 use pkgar::{ext::EntryExt, PackageHead};
 use pkgar_core::PackageSrc;
 use pkgar_keys::PublicKeyFile;
-use redox_installer::{with_whole_disk, Config, DiskOption};
+use redox_installer::{try_fast_install, with_redoxfs_mount, with_whole_disk, Config, DiskOption};
 use std::{
     ffi::OsStr,
     fs,
@@ -342,10 +345,27 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
         efi_partition_size: None,
         skip_partitions: false,
     };
-    let res = with_whole_disk(
-        &disk_path,
-        &disk_option,
-        |mount_path: &Path| -> anyhow::Result<()> {
+    let res = with_whole_disk(&disk_path, &disk_option, |mut fs| -> anyhow::Result<()> {
+        // Fast install method via filesystem clone
+        let mut last_progress = 0;
+        if try_fast_install(&mut fs, |used, used_old| {
+            progress = ((used * 100) / used_old) as usize;
+            if progress != last_progress {
+                message!(
+                    "{}%: {} MB/{} MB",
+                    progress,
+                    used / 1000 / 1000,
+                    used_old / 1000 / 1000
+                );
+                last_progress = progress;
+            }
+        })? {
+            progress = 100;
+            message!("Finished installing using fast mode");
+            return Ok(());
+        }
+
+        with_redoxfs_mount(fs, |mount_path: &Path| -> anyhow::Result<()> {
             message!("Loading filesystem.toml");
             let mut config: Config = {
                 let path = root_path.join("filesystem.toml");
@@ -399,8 +419,8 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
             progress = 100;
             message!("Finished installing, unmounting filesystem");
             Ok(())
-        },
-    );
+        })
+    });
 
     match res {
         Ok(()) => {
@@ -677,7 +697,7 @@ impl Application for Window {
                     output.send(message).await.unwrap();
                     state = new_state;
                 }
-            })
+            }),
         )
     }
 }
