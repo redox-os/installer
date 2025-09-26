@@ -684,7 +684,16 @@ where
     with_redoxfs(disk_redoxfs, disk_option.password_opt, callback)
 }
 
+#[cfg(not(target_os = "redox"))]
+pub fn try_fast_install<D: redoxfs::Disk, F: FnMut(u64, u64)>(
+    _fs: &mut redoxfs::FileSystem<D>,
+    _progress: F,
+) -> Result<bool> {
+    Ok(false)
+}
+
 /// Try fast install using live disk memory
+#[cfg(target_os = "redox")]
 pub fn try_fast_install<D: redoxfs::Disk, F: FnMut(u64, u64)>(
     fs: &mut redoxfs::FileSystem<D>,
     mut progress: F,
