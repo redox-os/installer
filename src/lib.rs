@@ -80,13 +80,7 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
 }
 
 fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &str) -> Result<()> {
-    let head_path = PathBuf::from(format!("{dest}/pkg/{packagename}.pkgar_head"));
-
-    // Check if the package has been already installed. Maybe it was a runtime dependency of some
-    // other package.
-    if head_path.exists() {
-        return Ok(());
-    }
+    let head_path = get_head_path(packagename, dest);
 
     let public_path = format!("{cookbook}/build/id_ed25519.pub.toml",);
     let pkgar_path = format!("{cookbook}/repo/{target}/{packagename}.pkgar");
@@ -102,11 +96,18 @@ fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &s
     // Recursively install any runtime dependencies.
     for dep in pkginfo.depends.iter() {
         let depname = dep.as_str();
-        println!("Installing runtime dependency for {packagename} from local repo: {depname}");
-        install_local_pkgar(cookbook, target, depname, dest)?;
+        if !get_head_path(packagename, dest).exists() {
+            println!("Installing runtime dependency for {packagename} from local repo: {depname}");
+            install_local_pkgar(cookbook, target, depname, dest)?;
+        }
     }
 
     Ok(())
+}
+
+fn get_head_path(packagename: &str, dest: &str) -> PathBuf {
+    let head_path = PathBuf::from(format!("{dest}/pkg/{packagename}.pkgar_head"));
+    head_path
 }
 
 //TODO: error handling
@@ -118,6 +119,9 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
 
     if let Some(cookbook) = cookbook {
         let dest_pkg = format!("{}/pkg", dest);
+        let mut local_packages = Vec::new();
+        let mut remote_packages = Vec::new();
+        let default_is_remote = config.general.repo_binary.unwrap_or(false);
         if !Path::new(&dest_pkg).exists() {
             fs::create_dir(&dest_pkg).unwrap();
         }
@@ -129,9 +133,9 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
                 Ignore,
             }
 
-            let rule = match (config.general.repo_binary, package) {
+            let rule = match (default_is_remote, package) {
                 (
-                    Some(true),
+                    true,
                     PackageConfig::Empty
                     | PackageConfig::Spec {
                         version: None,
@@ -146,29 +150,53 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
 
             match rule {
                 Rule::RemotePrebuilt => {
-                    println!("Installing package from remote: {packagename}");
-                    library
-                        .install(vec![pkg::PackageName::new(packagename).unwrap()])
-                        .unwrap();
+                    remote_packages.push(packagename);
                 }
                 Rule::Build => {
-                    println!("Installing package from local repo: {}", packagename);
-                    install_local_pkgar(cookbook, target, packagename, dest).unwrap();
+                    local_packages.push(packagename);
                 }
                 Rule::Ignore => {
                     // do nothing, not even logging it
                 }
             }
         }
+
+        // overrided packages source must be installed first
+        if default_is_remote {
+            install_local_packages(dest, target, local_packages, cookbook);
+            install_remote_packages(dest, &mut library, remote_packages);
+        } else {
+            install_remote_packages(dest, &mut library, remote_packages);
+            install_local_packages(dest, target, local_packages, cookbook);
+        }
     } else {
-        for packagename in config.packages.keys() {
-            println!("Installing package from remote: {}", packagename);
+        install_remote_packages(dest, &mut library, config.packages.keys().collect());
+    }
+}
+
+fn install_local_packages(
+    dest: &str,
+    target: &String,
+    local_packages: Vec<&String>,
+    cookbook: &str,
+) {
+    for packagename in local_packages {
+        if !get_head_path(packagename, dest).exists() {
+            println!("Installing package from local repo: {}", packagename);
+            install_local_pkgar(cookbook, target, packagename, dest).unwrap();
+        }
+    }
+}
+
+fn install_remote_packages(dest: &str, library: &mut Library, remote_packages: Vec<&String>) {
+    for packagename in remote_packages {
+        if !get_head_path(packagename, dest).exists() {
+            println!("Installing package from remote: {packagename}");
             library
                 .install(vec![pkg::PackageName::new(packagename).unwrap()])
                 .unwrap();
         }
     }
-
     library.apply().unwrap();
 }
 
