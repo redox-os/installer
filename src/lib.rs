@@ -96,7 +96,7 @@ fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &s
     // Recursively install any runtime dependencies.
     for dep in pkginfo.depends.iter() {
         let depname = dep.as_str();
-        if !get_head_path(packagename, dest).exists() {
+        if !get_head_path(depname, dest).exists() {
             println!("Installing runtime dependency for {packagename} from local repo: {depname}");
             install_local_pkgar(cookbook, target, depname, dest)?;
         }
