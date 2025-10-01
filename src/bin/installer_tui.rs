@@ -1,10 +1,9 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use pkgar::{ext::EntryExt, PackageHead};
 use pkgar_core::PackageSrc;
 use pkgar_keys::PublicKeyFile;
 use redox_installer::{try_fast_install, with_redoxfs_mount, with_whole_disk, Config, DiskOption};
 use std::{
-    env,
     ffi::OsStr,
     fs,
     io::{self, Read, Write},
