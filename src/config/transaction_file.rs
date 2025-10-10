@@ -6,6 +6,7 @@ use crate::Result;
 pub struct FileConfig {
     path: String,
     data: String,
+    directory: bool,
 }
 
 impl FileConfig {
@@ -13,30 +14,48 @@ impl FileConfig {
         FileConfig {
             path: path.into(),
             data: data.into(),
+            directory: false,
+        }
+    }
+
+    pub fn new_directory(path: impl Into<String>) -> FileConfig {
+        FileConfig {
+            path: path.into(),
+            data: String::new(),
+            directory: true,
         }
     }
 
     pub(crate) fn create<D: Disk>(&self, filesystem: &mut FileSystem<D>) -> Result<()> {
         let filename = self.path.trim_start_matches("/");
         let ctime = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
+        let mode = if self.directory {
+            Node::MODE_DIR
+        } else {
+            Node::MODE_FILE
+        };
         let node = filesystem.tx(|tx| {
             tx.create_node(
                 TreePtr::<Node>::root(),
                 filename,
-                Node::MODE_FILE,
+                mode,
                 ctime.as_secs(),
                 ctime.subsec_nanos(),
             )
         })?;
-        filesystem.tx(|tx| {
-            tx.write_node(
-                TreePtr::<Node>::new(node.id()),
-                0,
-                self.data.as_bytes(),
-                ctime.as_secs(),
-                ctime.subsec_nanos(),
-            )
-        })?;
+
+        if !self.directory {
+            filesystem.tx(|tx| {
+                tx.write_node(
+                    TreePtr::<Node>::new(node.id()),
+                    0,
+                    self.data.as_bytes(),
+                    ctime.as_secs(),
+                    ctime.subsec_nanos(),
+                )
+            })?;
+        }
+
         Ok(())
     }
 }
@@ -96,5 +115,19 @@ mod test {
             .unwrap();
         assert!(node.data().is_file());
         assert_eq!(&buf, data.as_bytes());
+    }
+
+    #[test]
+    fn write_dir_node_in_root_dir() {
+        let mut filesystem = create_mock_filesystem();
+        let dirname = "root";
+        let path = format!("/{dirname}");
+        FileConfig::new_directory(path)
+            .create(&mut filesystem)
+            .unwrap();
+        let node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::root(), dirname))
+            .unwrap();
+        assert!(node.data().is_dir());
     }
 }
