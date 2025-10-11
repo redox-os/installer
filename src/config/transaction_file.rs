@@ -109,8 +109,9 @@ impl FileConfig {
         ctime: Duration,
     ) -> Result<()> {
         let mut parent_id = TreePtr::<Node>::root().id();
+        let mut iter = Path::new(&self.path).components().peekable();
 
-        for dir in Path::new(&self.path).components() {
+        while let Some(dir) = iter.next() {
             let parent_ptr = TreePtr::<Node>::new(parent_id);
             match dir {
                 Component::RootDir => continue,
@@ -127,11 +128,25 @@ impl FileConfig {
                             ctime.subsec_nanos(),
                         )
                     })?;
+                    if iter.peek().is_none() {
+                        continue;
+                    }
                     parent_id = node.id();
                 }
                 _ => todo!(),
             }
         }
+
+        let dirname = if let Component::Normal(dir) = Path::new(&self.path)
+            .components()
+            .next_back()
+            .expect("Safe as iterator has length greater than 1")
+        {
+            dir
+        } else {
+            OsStr::new("/")
+        };
+        self.apply_owners(filesystem, parent_id, dirname)?;
 
         Ok(())
     }
@@ -140,15 +155,15 @@ impl FileConfig {
         &self,
         filesystem: &mut FileSystem<D>,
         parent_id: u32,
-        filename: &OsStr,
+        component_name: &OsStr,
     ) -> Result<()> {
         let mut node = filesystem
             .tx(|tx| {
                 tx.find_node(
                     TreePtr::<Node>::new(parent_id),
-                    filename.to_str().expect(&format!(
-                        "Expected filename to be valid utf-8: {:?}",
-                        filename
+                    component_name.to_str().expect(&format!(
+                        "Expected component name to be valid utf-8: {:?}",
+                        component_name
                     )),
                 )
             })
@@ -298,5 +313,20 @@ mod test {
             node.data().mode() & Node::MODE_PERM,
             0o0755 & Node::MODE_PERM
         );
+    }
+
+    #[test]
+    fn default_dir_node_owners() {
+        let mut filesystem = create_mock_filesystem();
+        let dirname = "root";
+        let dirpath = format!("/{dirname}");
+        FileConfig::new_directory(dirpath)
+            .create(&mut filesystem)
+            .unwrap();
+        let node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::root(), dirname))
+            .unwrap();
+        assert_eq!(node.data().uid(), !0);
+        assert_eq!(node.data().gid(), !0);
     }
 }
