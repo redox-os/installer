@@ -122,7 +122,7 @@ impl FileConfig {
                                 "Expected subdir name to be valid utf-8: {:?}",
                                 subdir
                             )),
-                            Node::MODE_DIR,
+                            Node::MODE_DIR | 0o0755 & Node::MODE_PERM,
                             ctime.as_secs(),
                             ctime.subsec_nanos(),
                         )
@@ -281,5 +281,22 @@ mod test {
                 _ => panic!(),
             }
         }
+    }
+
+    #[test]
+    fn default_dir_node_perms() {
+        let mut filesystem = create_mock_filesystem();
+        let dirname = "root";
+        let dirpath = format!("/{dirname}");
+        FileConfig::new_directory(dirpath)
+            .create(&mut filesystem)
+            .unwrap();
+        let node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::root(), dirname))
+            .unwrap();
+        assert_eq!(
+            node.data().mode() & Node::MODE_PERM,
+            0o0755 & Node::MODE_PERM
+        );
     }
 }
