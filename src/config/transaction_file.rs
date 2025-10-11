@@ -1,4 +1,7 @@
-use std::path::{Component, Path};
+use std::{
+    path::{Component, Path},
+    time::Duration,
+};
 
 use redoxfs::{Disk, FileSystem, Node, TreePtr};
 
@@ -32,85 +35,100 @@ impl FileConfig {
         let ctime = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
 
         if self.directory {
-            let mut parent_id = TreePtr::<Node>::root().id();
-            for dir in Path::new(&self.path).components() {
-                let parent_ptr = TreePtr::<Node>::new(parent_id);
-                match dir {
-                    Component::RootDir => continue,
-                    Component::Normal(subdir) => {
-                        let node = filesystem.tx(|tx| {
-                            tx.create_node(
-                                parent_ptr,
-                                subdir.to_str().expect(&format!(
-                                    "Expected subdir name to be valid utf-8: {:?}",
-                                    subdir
-                                )),
-                                Node::MODE_DIR,
-                                ctime.as_secs(),
-                                ctime.subsec_nanos(),
-                            )
-                        })?;
-                        parent_id = node.id();
-                    }
-                    _ => todo!(),
-                }
-            }
+            self.create_directory(filesystem, ctime)?;
         } else {
-            let mut iter = Path::new(&self.path).components();
-            let filename = if let Component::Normal(val) = iter
-                .next_back()
-                .expect("Expected at least one element in path-components iterator")
-            {
-                val
-            } else {
-                panic!(
-                    "Expected final path-component of non-directory FileConfig to be a filename"
-                );
-            };
-            let mut parent_id = TreePtr::<Node>::root().id();
-
-            for dir in iter {
-                let parent_ptr = TreePtr::<Node>::new(parent_id);
-                match dir {
-                    Component::RootDir => continue,
-                    Component::Normal(subdir) => {
-                        let node = filesystem.tx(|tx| {
-                            tx.find_node(
-                                parent_ptr,
-                                subdir.to_str().expect(&format!(
-                                    "Expected subdir name to be valid utf-8: {:?}",
-                                    subdir
-                                )),
-                            )
-                        })?;
-                        parent_id = node.id();
-                    }
-                    _ => todo!(),
-                }
-            }
-
-            let node = filesystem.tx(|tx| {
-                tx.create_node(
-                    TreePtr::<Node>::new(parent_id),
-                    filename.to_str().expect(&format!(
-                        "Expected filename to be valid utf-8: {:?}",
-                        filename
-                    )),
-                    Node::MODE_FILE,
-                    ctime.as_secs(),
-                    ctime.subsec_nanos(),
-                )
-            })?;
-            filesystem.tx(|tx| {
-                tx.write_node(
-                    TreePtr::<Node>::new(node.id()),
-                    0,
-                    self.data.as_bytes(),
-                    ctime.as_secs(),
-                    ctime.subsec_nanos(),
-                )
-            })?;
+            self.create_file(filesystem, ctime)?;
         };
+
+        Ok(())
+    }
+
+    fn create_file<D: Disk>(&self, filesystem: &mut FileSystem<D>, ctime: Duration) -> Result<()> {
+        let mut iter = Path::new(&self.path).components();
+        let filename = if let Component::Normal(val) = iter
+            .next_back()
+            .expect("Expected at least one element in path-components iterator")
+        {
+            val
+        } else {
+            panic!("Expected final path-component of non-directory FileConfig to be a filename");
+        };
+        let mut parent_id = TreePtr::<Node>::root().id();
+
+        for dir in iter {
+            let parent_ptr = TreePtr::<Node>::new(parent_id);
+            match dir {
+                Component::RootDir => continue,
+                Component::Normal(subdir) => {
+                    let node = filesystem.tx(|tx| {
+                        tx.find_node(
+                            parent_ptr,
+                            subdir.to_str().expect(&format!(
+                                "Expected subdir name to be valid utf-8: {:?}",
+                                subdir
+                            )),
+                        )
+                    })?;
+                    parent_id = node.id();
+                }
+                _ => todo!(),
+            }
+        }
+
+        let node = filesystem.tx(|tx| {
+            tx.create_node(
+                TreePtr::<Node>::new(parent_id),
+                filename.to_str().expect(&format!(
+                    "Expected filename to be valid utf-8: {:?}",
+                    filename
+                )),
+                Node::MODE_FILE,
+                ctime.as_secs(),
+                ctime.subsec_nanos(),
+            )
+        })?;
+        filesystem.tx(|tx| {
+            tx.write_node(
+                TreePtr::<Node>::new(node.id()),
+                0,
+                self.data.as_bytes(),
+                ctime.as_secs(),
+                ctime.subsec_nanos(),
+            )
+        })?;
+
+        Ok(())
+    }
+
+    fn create_directory<D: Disk>(
+        &self,
+        filesystem: &mut FileSystem<D>,
+        ctime: Duration,
+    ) -> Result<()> {
+        let mut parent_id = TreePtr::<Node>::root().id();
+
+        for dir in Path::new(&self.path).components() {
+            let parent_ptr = TreePtr::<Node>::new(parent_id);
+            match dir {
+                Component::RootDir => continue,
+                Component::Normal(subdir) => {
+                    let node = filesystem.tx(|tx| {
+                        tx.create_node(
+                            parent_ptr,
+                            subdir.to_str().expect(&format!(
+                                "Expected subdir name to be valid utf-8: {:?}",
+                                subdir
+                            )),
+                            Node::MODE_DIR,
+                            ctime.as_secs(),
+                            ctime.subsec_nanos(),
+                        )
+                    })?;
+                    parent_id = node.id();
+                }
+                _ => todo!(),
+            }
+        }
 
         Ok(())
     }
