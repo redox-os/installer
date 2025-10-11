@@ -1,3 +1,5 @@
+use std::path::{Component, Path};
+
 use redoxfs::{Disk, FileSystem, Node, TreePtr};
 
 use crate::Result;
@@ -29,22 +31,41 @@ impl FileConfig {
     pub(crate) fn create<D: Disk>(&self, filesystem: &mut FileSystem<D>) -> Result<()> {
         let filename = self.path.trim_start_matches("/");
         let ctime = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
-        let mode = if self.directory {
-            Node::MODE_DIR
-        } else {
-            Node::MODE_FILE
-        };
-        let node = filesystem.tx(|tx| {
-            tx.create_node(
-                TreePtr::<Node>::root(),
-                filename,
-                mode,
-                ctime.as_secs(),
-                ctime.subsec_nanos(),
-            )
-        })?;
 
-        if !self.directory {
+        if self.directory {
+            let mut parent_id = TreePtr::<Node>::root().id();
+            for dir in Path::new(&self.path).components() {
+                let parent_ptr = TreePtr::<Node>::new(parent_id);
+                match dir {
+                    Component::RootDir => continue,
+                    Component::Normal(subdir) => {
+                        let node = filesystem.tx(|tx| {
+                            tx.create_node(
+                                parent_ptr,
+                                subdir.to_str().expect(&format!(
+                                    "Expected subdir name to be valid utf-8: {:?}",
+                                    subdir
+                                )),
+                                Node::MODE_DIR,
+                                ctime.as_secs(),
+                                ctime.subsec_nanos(),
+                            )
+                        })?;
+                        parent_id = node.id();
+                    }
+                    _ => todo!(),
+                }
+            }
+        } else {
+            let node = filesystem.tx(|tx| {
+                tx.create_node(
+                    TreePtr::<Node>::root(),
+                    filename,
+                    Node::MODE_FILE,
+                    ctime.as_secs(),
+                    ctime.subsec_nanos(),
+                )
+            })?;
             filesystem.tx(|tx| {
                 tx.write_node(
                     TreePtr::<Node>::new(node.id()),
@@ -54,7 +75,7 @@ impl FileConfig {
                     ctime.subsec_nanos(),
                 )
             })?;
-        }
+        };
 
         Ok(())
     }
@@ -62,6 +83,8 @@ impl FileConfig {
 
 #[cfg(test)]
 mod test {
+    use std::path::{Component, Path};
+
     use redoxfs::{Disk, FileSystem, Node, TreePtr, BLOCK_SIZE};
 
     use super::FileConfig;
@@ -118,16 +141,26 @@ mod test {
     }
 
     #[test]
-    fn write_dir_node_in_root_dir() {
+    fn create_all_parents_of_dir_node() {
         let mut filesystem = create_mock_filesystem();
-        let dirname = "root";
-        let path = format!("/{dirname}");
-        FileConfig::new_directory(path)
+        let dirpath = "/dir/subdir/subsubdir";
+        FileConfig::new_directory(dirpath)
             .create(&mut filesystem)
             .unwrap();
-        let node = filesystem
-            .tx(|tx| tx.find_node(TreePtr::<Node>::root(), dirname))
-            .unwrap();
-        assert!(node.data().is_dir());
+        let mut parent_id = TreePtr::<Node>::root().id();
+        for dir in Path::new(dirpath).components() {
+            let parent_ptr = TreePtr::<Node>::new(parent_id);
+            match dir {
+                Component::RootDir => continue,
+                Component::Normal(subdir) => {
+                    let node = filesystem
+                        .tx(|tx| tx.find_node(parent_ptr, subdir.to_str().unwrap()))
+                        .unwrap();
+                    assert!(node.data().is_dir());
+                    parent_id = node.id();
+                }
+                _ => panic!(),
+            }
+        }
     }
 }
