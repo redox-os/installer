@@ -29,7 +29,6 @@ impl FileConfig {
     }
 
     pub(crate) fn create<D: Disk>(&self, filesystem: &mut FileSystem<D>) -> Result<()> {
-        let filename = self.path.trim_start_matches("/");
         let ctime = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
 
         if self.directory {
@@ -57,10 +56,46 @@ impl FileConfig {
                 }
             }
         } else {
+            let mut iter = Path::new(&self.path).components();
+            let filename = if let Component::Normal(val) = iter
+                .next_back()
+                .expect("Expected at least one element in path-components iterator")
+            {
+                val
+            } else {
+                panic!(
+                    "Expected final path-component of non-directory FileConfig to be a filename"
+                );
+            };
+            let mut parent_id = TreePtr::<Node>::root().id();
+
+            for dir in iter {
+                let parent_ptr = TreePtr::<Node>::new(parent_id);
+                match dir {
+                    Component::RootDir => continue,
+                    Component::Normal(subdir) => {
+                        let node = filesystem.tx(|tx| {
+                            tx.find_node(
+                                parent_ptr,
+                                subdir.to_str().expect(&format!(
+                                    "Expected subdir name to be valid utf-8: {:?}",
+                                    subdir
+                                )),
+                            )
+                        })?;
+                        parent_id = node.id();
+                    }
+                    _ => todo!(),
+                }
+            }
+
             let node = filesystem.tx(|tx| {
                 tx.create_node(
-                    TreePtr::<Node>::root(),
-                    filename,
+                    TreePtr::<Node>::new(parent_id),
+                    filename.to_str().expect(&format!(
+                        "Expected filename to be valid utf-8: {:?}",
+                        filename
+                    )),
                     Node::MODE_FILE,
                     ctime.as_secs(),
                     ctime.subsec_nanos(),
@@ -121,22 +156,30 @@ mod test {
     }
 
     #[test]
-    fn write_file_node_in_root_dir() {
+    fn write_file_node_in_existent_dir() {
         let mut filesystem = create_mock_filesystem();
         let filename = "foo.txt";
-        let path = format!("/{filename}");
+        let dirname = "root";
+        let parent_dirpath = format!("/{dirname}");
+        let filepath = format!("{parent_dirpath}/{filename}");
         let data = "Hello, world!";
-        FileConfig::new_file(path, data)
+        FileConfig::new_directory(parent_dirpath)
             .create(&mut filesystem)
             .unwrap();
-        let node = filesystem
-            .tx(|tx| tx.find_node(TreePtr::<Node>::root(), filename))
+        FileConfig::new_file(filepath, data)
+            .create(&mut filesystem)
             .unwrap();
+        let dir_node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::root(), dirname))
+            .unwrap();
+        let file_node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::new(dir_node.id()), filename))
+            .unwrap();
+        assert!(file_node.data().is_file());
         let mut buf = [0; 13];
         filesystem
-            .tx(|tx| tx.read_node(TreePtr::<Node>::new(node.id()), 0, &mut buf, 1, 0))
+            .tx(|tx| tx.read_node(TreePtr::<Node>::new(file_node.id()), 0, &mut buf, 1, 0))
             .unwrap();
-        assert!(node.data().is_file());
         assert_eq!(&buf, data.as_bytes());
     }
 
