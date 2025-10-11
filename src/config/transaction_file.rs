@@ -82,7 +82,7 @@ impl FileConfig {
                     "Expected filename to be valid utf-8: {:?}",
                     filename
                 )),
-                Node::MODE_FILE,
+                Node::MODE_FILE | 0o0644 & Node::MODE_PERM,
                 ctime.as_secs(),
                 ctime.subsec_nanos(),
             )
@@ -199,6 +199,23 @@ mod test {
             .tx(|tx| tx.read_node(TreePtr::<Node>::new(file_node.id()), 0, &mut buf, 1, 0))
             .unwrap();
         assert_eq!(&buf, data.as_bytes());
+    }
+
+    #[test]
+    fn default_file_node_perms() {
+        let mut filesystem = create_mock_filesystem();
+        let filename = "foo.txt";
+        let filepath = format!("/{filename}");
+        FileConfig::new_file(filepath, "")
+            .create(&mut filesystem)
+            .unwrap();
+        let node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::root(), filename))
+            .unwrap();
+        assert_eq!(
+            node.data().mode() & Node::MODE_PERM,
+            0o0644 & Node::MODE_PERM
+        );
     }
 
     #[test]
