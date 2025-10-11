@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsStr,
     path::{Component, Path},
     time::Duration,
 };
@@ -97,6 +98,8 @@ impl FileConfig {
             )
         })?;
 
+        self.apply_owners(filesystem, parent_id, filename)?;
+
         Ok(())
     }
 
@@ -130,6 +133,29 @@ impl FileConfig {
             }
         }
 
+        Ok(())
+    }
+
+    fn apply_owners<D: Disk>(
+        &self,
+        filesystem: &mut FileSystem<D>,
+        parent_id: u32,
+        filename: &OsStr,
+    ) -> Result<()> {
+        let mut node = filesystem
+            .tx(|tx| {
+                tx.find_node(
+                    TreePtr::<Node>::new(parent_id),
+                    filename.to_str().expect(&format!(
+                        "Expected filename to be valid utf-8: {:?}",
+                        filename
+                    )),
+                )
+            })
+            .unwrap();
+        node.data_mut().set_uid(!0);
+        node.data_mut().set_gid(!0);
+        filesystem.tx(|tx| tx.sync_tree(node))?;
         Ok(())
     }
 }
@@ -216,6 +242,21 @@ mod test {
             node.data().mode() & Node::MODE_PERM,
             0o0644 & Node::MODE_PERM
         );
+    }
+
+    #[test]
+    fn default_file_node_owners() {
+        let mut filesystem = create_mock_filesystem();
+        let filename = "foo.txt";
+        let filepath = format!("/{filename}");
+        FileConfig::new_file(filepath, "")
+            .create(&mut filesystem)
+            .unwrap();
+        let node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::root(), filename))
+            .unwrap();
+        assert_eq!(node.data().uid(), !0);
+        assert_eq!(node.data().gid(), !0);
     }
 
     #[test]
