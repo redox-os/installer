@@ -57,8 +57,8 @@ impl FileConfig {
     }
 
     fn create_file<D: Disk>(&self, filesystem: &mut FileSystem<D>, ctime: Duration) -> Result<()> {
-        let mut iter = Path::new(&self.path).components();
-        let filename = if let Component::Normal(val) = iter
+        let filename = if let Component::Normal(val) = Path::new(&self.path)
+            .components()
             .next_back()
             .expect("Expected at least one element in path-components iterator")
         {
@@ -66,33 +66,13 @@ impl FileConfig {
         } else {
             panic!("Expected final path-component of non-directory FileConfig to be a filename");
         };
-        let mut parent_id = TreePtr::<Node>::root().id();
-
-        for dir in iter {
-            let parent_ptr = TreePtr::<Node>::new(parent_id);
-            match dir {
-                Component::RootDir => continue,
-                Component::Normal(subdir) => {
-                    let subdir = subdir.to_str().expect(&format!(
-                        "Expected subdir name to be valid utf-8: {:?}",
-                        subdir
-                    ));
-                    let node = filesystem.tx(|tx| match tx.find_node(parent_ptr, subdir) {
-                        Ok(node) => Ok(node),
-                        Err(_) => tx.create_node(
-                            parent_ptr,
-                            subdir,
-                            Node::MODE_DIR | 0o0755 & Node::MODE_PERM,
-                            ctime.as_secs(),
-                            ctime.subsec_nanos(),
-                        ),
-                    })?;
-                    parent_id = node.id();
-                }
-                _ => todo!(),
-            }
-        }
-
+        let parent_id = self.create_dir_all(
+            filesystem,
+            ctime,
+            Path::new(&self.path)
+                .parent()
+                .expect("Expected file to have parent directory"),
+        )?;
         let mode = if self.symlink {
             Node::MODE_SYMLINK | 0o0777 & Node::MODE_PERM
         } else {
@@ -130,42 +110,13 @@ impl FileConfig {
         filesystem: &mut FileSystem<D>,
         ctime: Duration,
     ) -> Result<()> {
-        let mut parent_id = TreePtr::<Node>::root().id();
-        let mut iter = Path::new(&self.path).components().peekable();
-
-        while let Some(dir) = iter.next() {
-            let parent_ptr = TreePtr::<Node>::new(parent_id);
-            match dir {
-                Component::RootDir => continue,
-                Component::Normal(subdir) => {
-                    let subdir = subdir.to_str().expect(&format!(
-                        "Expected subdir name to be valid utf-8: {:?}",
-                        subdir
-                    ));
-                    let mode = if iter.peek().is_some() {
-                        0o0755 & Node::MODE_PERM
-                    } else {
-                        self.mode.unwrap_or(0o0755) as u16 & Node::MODE_PERM
-                    };
-                    let node = filesystem.tx(|tx| match tx.find_node(parent_ptr, subdir) {
-                        Ok(node) => Ok(node),
-                        Err(_) => tx.create_node(
-                            parent_ptr,
-                            subdir,
-                            Node::MODE_DIR | mode,
-                            ctime.as_secs(),
-                            ctime.subsec_nanos(),
-                        ),
-                    })?;
-                    if iter.peek().is_none() {
-                        continue;
-                    }
-                    parent_id = node.id();
-                }
-                _ => todo!(),
-            }
-        }
-
+        let parent_id = self.create_dir_all(
+            filesystem,
+            ctime,
+            Path::new(&self.path)
+                .parent()
+                .expect("Expected directory to have parent directory"),
+        )?;
         let dirname = if let Component::Normal(dir) = Path::new(&self.path)
             .components()
             .next_back()
@@ -175,9 +126,57 @@ impl FileConfig {
         } else {
             OsStr::new("/")
         };
+        filesystem.tx(|tx| {
+            tx.create_node(
+                TreePtr::<Node>::new(parent_id),
+                dirname.to_str().expect(&format!(
+                    "Expected dirname io be valid utf-8: {:?}",
+                    dirname
+                )),
+                Node::MODE_DIR | self.mode.unwrap_or(0o0755) as u16 & Node::MODE_PERM,
+                ctime.as_secs(),
+                ctime.subsec_nanos(),
+            )
+        })?;
         self.apply_owners(filesystem, parent_id, dirname)?;
 
         Ok(())
+    }
+
+    fn create_dir_all<D: Disk>(
+        &self,
+        filesystem: &mut FileSystem<D>,
+        ctime: Duration,
+        path: &Path,
+    ) -> Result<u32> {
+        let mut parent_id = TreePtr::<Node>::root().id();
+
+        for dir in path.components() {
+            let parent_ptr = TreePtr::<Node>::new(parent_id);
+            match dir {
+                Component::RootDir => continue,
+                Component::Normal(subdir) => {
+                    let subdir = subdir.to_str().expect(&format!(
+                        "Expected subdir name to be valid utf-8: {:?}",
+                        subdir
+                    ));
+                    let node = filesystem.tx(|tx| match tx.find_node(parent_ptr, subdir) {
+                        Ok(node) => Ok(node),
+                        Err(_) => tx.create_node(
+                            parent_ptr,
+                            subdir,
+                            Node::MODE_DIR | 0o0755 & Node::MODE_PERM,
+                            ctime.as_secs(),
+                            ctime.subsec_nanos(),
+                        ),
+                    })?;
+                    parent_id = node.id();
+                }
+                _ => todo!(),
+            }
+        }
+
+        Ok(parent_id)
     }
 
     fn apply_owners<D: Disk>(
