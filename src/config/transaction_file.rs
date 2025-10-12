@@ -12,6 +12,7 @@ use crate::Result;
 pub struct FileConfig {
     path: String,
     data: String,
+    symlink: bool,
     directory: bool,
     mode: Option<u32>,
     uid: Option<u32>,
@@ -87,6 +88,11 @@ impl FileConfig {
             }
         }
 
+        let mode = if self.symlink {
+            Node::MODE_SYMLINK | 0o0777 & Node::MODE_PERM
+        } else {
+            Node::MODE_FILE | self.mode.unwrap_or(0o0644) as u16 & Node::MODE_PERM
+        };
         let node = filesystem.tx(|tx| {
             tx.create_node(
                 TreePtr::<Node>::new(parent_id),
@@ -94,7 +100,7 @@ impl FileConfig {
                     "Expected filename to be valid utf-8: {:?}",
                     filename
                 )),
-                Node::MODE_FILE | self.mode.unwrap_or(0o0644) as u16 & Node::MODE_PERM,
+                mode,
                 ctime.as_secs(),
                 ctime.subsec_nanos(),
             )
@@ -251,6 +257,21 @@ mod test {
             .tx(|tx| tx.read_node(TreePtr::<Node>::new(file_node.id()), 0, &mut buf, 1, 0))
             .unwrap();
         assert_eq!(&buf, data.as_bytes());
+    }
+
+    #[test]
+    fn write_symlink_file_node() {
+        let mut filesystem = create_mock_filesystem();
+        let filename = "bin";
+        let filepath = format!("/{filename}");
+        let data = "user/bin";
+        let mut file_config = FileConfig::new_file(filepath, data);
+        file_config.symlink = true;
+        file_config.create(&mut filesystem).unwrap();
+        let node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::root(), filename))
+            .unwrap();
+        assert_eq!(node.data().mode(), Node::MODE_SYMLINK | 0o0777);
     }
 
     #[test]
