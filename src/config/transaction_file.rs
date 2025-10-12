@@ -138,17 +138,19 @@ impl FileConfig {
             match dir {
                 Component::RootDir => continue,
                 Component::Normal(subdir) => {
-                    let node = filesystem.tx(|tx| {
-                        tx.create_node(
+                    let subdir = subdir.to_str().expect(&format!(
+                        "Expected subdir name to be valid utf-8: {:?}",
+                        subdir
+                    ));
+                    let node = filesystem.tx(|tx| match tx.find_node(parent_ptr, subdir) {
+                        Ok(node) => Ok(node),
+                        Err(_) => tx.create_node(
                             parent_ptr,
-                            subdir.to_str().expect(&format!(
-                                "Expected subdir name to be valid utf-8: {:?}",
-                                subdir
-                            )),
+                            subdir,
                             Node::MODE_DIR | self.mode.unwrap_or(0o0755) as u16 & Node::MODE_PERM,
                             ctime.as_secs(),
                             ctime.subsec_nanos(),
-                        )
+                        ),
                     })?;
                     if iter.peek().is_none() {
                         continue;
@@ -349,6 +351,34 @@ mod test {
             .unwrap();
         let mut parent_id = TreePtr::<Node>::root().id();
         for dir in Path::new(dirpath).components() {
+            let parent_ptr = TreePtr::<Node>::new(parent_id);
+            match dir {
+                Component::RootDir => continue,
+                Component::Normal(subdir) => {
+                    let node = filesystem
+                        .tx(|tx| tx.find_node(parent_ptr, subdir.to_str().unwrap()))
+                        .unwrap();
+                    assert!(node.data().is_dir());
+                    parent_id = node.id();
+                }
+                _ => panic!(),
+            }
+        }
+    }
+
+    #[test]
+    fn create_subdir_within_existing_dir_doesnt_fail() {
+        let mut filesystem = create_mock_filesystem();
+        let dirpath = "/dir";
+        let subdirpath = "/dir/subdir";
+        FileConfig::new_directory(dirpath)
+            .create(&mut filesystem)
+            .unwrap();
+        FileConfig::new_directory(subdirpath)
+            .create(&mut filesystem)
+            .unwrap();
+        let mut parent_id = TreePtr::<Node>::root().id();
+        for dir in Path::new(subdirpath).components() {
             let parent_ptr = TreePtr::<Node>::new(parent_id);
             match dir {
                 Component::RootDir => continue,
