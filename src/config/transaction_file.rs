@@ -8,15 +8,18 @@ use redoxfs::{Disk, FileSystem, Node, TreePtr};
 
 use crate::Result;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct FileConfig {
     path: String,
     data: String,
+    #[serde(default)]
     symlink: bool,
+    #[serde(default)]
     directory: bool,
     mode: Option<u32>,
     uid: Option<u32>,
     gid: Option<u32>,
+    #[serde(default)]
     postinstall: bool,
 }
 
