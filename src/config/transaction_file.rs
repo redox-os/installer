@@ -17,6 +17,7 @@ pub struct FileConfig {
     mode: Option<u32>,
     uid: Option<u32>,
     gid: Option<u32>,
+    postinstall: bool,
 }
 
 impl FileConfig {
