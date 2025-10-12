@@ -142,12 +142,17 @@ impl FileConfig {
                         "Expected subdir name to be valid utf-8: {:?}",
                         subdir
                     ));
+                    let mode = if iter.peek().is_some() {
+                        0o0755 & Node::MODE_PERM
+                    } else {
+                        self.mode.unwrap_or(0o0755) as u16 & Node::MODE_PERM
+                    };
                     let node = filesystem.tx(|tx| match tx.find_node(parent_ptr, subdir) {
                         Ok(node) => Ok(node),
                         Err(_) => tx.create_node(
                             parent_ptr,
                             subdir,
-                            Node::MODE_DIR | self.mode.unwrap_or(0o0755) as u16 & Node::MODE_PERM,
+                            Node::MODE_DIR | mode,
                             ctime.as_secs(),
                             ctime.subsec_nanos(),
                         ),
@@ -453,22 +458,30 @@ mod test {
     fn specify_dir_node_mode_and_owners() {
         let mut filesystem = create_mock_filesystem();
         let dirname = "root";
-        let dirpath = format!("/{dirname}");
+        let subdirname = "subdir";
+        let subdirpath = format!("/{dirname}/{subdirname}");
         let mode = 0o0123;
         let uid = 1234;
         let gid = 5678;
-        FileConfig::new_directory(dirpath)
+        FileConfig::new_directory(subdirpath)
             .with_mod(mode, uid, gid)
             .create(&mut filesystem)
             .unwrap();
-        let node = filesystem
+        let dir_node = filesystem
             .tx(|tx| tx.find_node(TreePtr::<Node>::root(), dirname))
             .unwrap();
         assert_eq!(
-            node.data().mode() & Node::MODE_PERM,
+            dir_node.data().mode() & Node::MODE_PERM,
+            0o0755 & Node::MODE_PERM
+        );
+        let subdir_node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::new(dir_node.id()), subdirname))
+            .unwrap();
+        assert_eq!(
+            subdir_node.data().mode() & Node::MODE_PERM,
             mode as u16 & Node::MODE_PERM
         );
-        assert_eq!(node.data().uid(), uid);
-        assert_eq!(node.data().gid(), gid);
+        assert_eq!(subdir_node.data().uid(), uid);
+        assert_eq!(subdir_node.data().gid(), gid);
     }
 }
