@@ -8,11 +8,14 @@ use redoxfs::{Disk, FileSystem, Node, TreePtr};
 
 use crate::Result;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct FileConfig {
     path: String,
     data: String,
     directory: bool,
+    mode: Option<u32>,
+    uid: Option<u32>,
+    gid: Option<u32>,
 }
 
 impl FileConfig {
@@ -20,7 +23,7 @@ impl FileConfig {
         FileConfig {
             path: path.into(),
             data: data.into(),
-            directory: false,
+            ..Default::default()
         }
     }
 
@@ -29,7 +32,15 @@ impl FileConfig {
             path: path.into(),
             data: String::new(),
             directory: true,
+            ..Default::default()
         }
+    }
+
+    pub fn with_mod(&mut self, mode: u32, uid: u32, gid: u32) -> &mut FileConfig {
+        self.mode = Some(mode);
+        self.uid = Some(uid);
+        self.gid = Some(gid);
+        self
     }
 
     pub(crate) fn create<D: Disk>(&self, filesystem: &mut FileSystem<D>) -> Result<()> {
@@ -83,7 +94,7 @@ impl FileConfig {
                     "Expected filename to be valid utf-8: {:?}",
                     filename
                 )),
-                Node::MODE_FILE | 0o0644 & Node::MODE_PERM,
+                Node::MODE_FILE | self.mode.unwrap_or(0o0644) as u16 & Node::MODE_PERM,
                 ctime.as_secs(),
                 ctime.subsec_nanos(),
             )
@@ -123,7 +134,7 @@ impl FileConfig {
                                 "Expected subdir name to be valid utf-8: {:?}",
                                 subdir
                             )),
-                            Node::MODE_DIR | 0o0755 & Node::MODE_PERM,
+                            Node::MODE_DIR | self.mode.unwrap_or(0o0755) as u16 & Node::MODE_PERM,
                             ctime.as_secs(),
                             ctime.subsec_nanos(),
                         )
@@ -168,8 +179,8 @@ impl FileConfig {
                 )
             })
             .unwrap();
-        node.data_mut().set_uid(!0);
-        node.data_mut().set_gid(!0);
+        node.data_mut().set_uid(self.uid.unwrap_or(!0));
+        node.data_mut().set_gid(self.gid.unwrap_or(!0));
         filesystem.tx(|tx| tx.sync_tree(node))?;
         Ok(())
     }
@@ -328,5 +339,51 @@ mod test {
             .unwrap();
         assert_eq!(node.data().uid(), !0);
         assert_eq!(node.data().gid(), !0);
+    }
+
+    #[test]
+    fn specify_file_node_mode_and_owners() {
+        let mut filesystem = create_mock_filesystem();
+        let filename = "foo.txt";
+        let filepath = format!("/{filename}");
+        let mode = 0o0123;
+        let uid = 1234;
+        let gid = 5678;
+        FileConfig::new_file(filepath, "")
+            .with_mod(mode, uid, gid)
+            .create(&mut filesystem)
+            .unwrap();
+        let node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::root(), filename))
+            .unwrap();
+        assert_eq!(
+            node.data().mode() & Node::MODE_PERM,
+            mode as u16 & Node::MODE_PERM
+        );
+        assert_eq!(node.data().uid(), uid);
+        assert_eq!(node.data().gid(), gid);
+    }
+
+    #[test]
+    fn specify_dir_node_mode_and_owners() {
+        let mut filesystem = create_mock_filesystem();
+        let dirname = "root";
+        let dirpath = format!("/{dirname}");
+        let mode = 0o0123;
+        let uid = 1234;
+        let gid = 5678;
+        FileConfig::new_directory(dirpath)
+            .with_mod(mode, uid, gid)
+            .create(&mut filesystem)
+            .unwrap();
+        let node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::root(), dirname))
+            .unwrap();
+        assert_eq!(
+            node.data().mode() & Node::MODE_PERM,
+            mode as u16 & Node::MODE_PERM
+        );
+        assert_eq!(node.data().uid(), uid);
+        assert_eq!(node.data().gid(), gid);
     }
 }
