@@ -20,6 +20,8 @@ pub struct FileConfig {
     uid: Option<u32>,
     gid: Option<u32>,
     #[serde(default)]
+    recursive_chown: bool,
+    #[serde(default)]
     postinstall: bool,
 }
 
@@ -45,6 +47,12 @@ impl FileConfig {
         self.mode = Some(mode);
         self.uid = Some(uid);
         self.gid = Some(gid);
+        self
+    }
+
+    pub fn with_recursive_mod(&mut self, mode: u32, uid: u32, gid: u32) -> &mut FileConfig {
+        self.with_mod(mode, uid, gid);
+        self.recursive_chown = true;
         self
     }
 
@@ -202,7 +210,74 @@ impl FileConfig {
             .unwrap();
         node.data_mut().set_uid(self.uid.unwrap_or(!0));
         node.data_mut().set_gid(self.gid.unwrap_or(!0));
+        let mode = if self.directory {
+            Node::MODE_DIR | self.mode.unwrap_or(0o0755) as u16 & Node::MODE_PERM
+        } else {
+            let type_mask = if self.symlink {
+                Node::MODE_SYMLINK
+            } else {
+                Node::MODE_FILE
+            };
+            let default_mode = if self.symlink { 0o0777 } else { 0o0644 };
+            type_mask | self.mode.unwrap_or(default_mode) as u16 & Node::MODE_PERM
+        };
+        node.data_mut().set_mode(mode);
+
+        if self.recursive_chown {
+            self.recursive_apply_owners_and_perms(filesystem, node.id())
+                .expect("Expected to be able to recursively apply mode and owners");
+        }
+
         filesystem.tx(|tx| tx.sync_tree(node))?;
+        Ok(())
+    }
+
+    fn recursive_apply_owners_and_perms<D: Disk>(
+        &self,
+        filesystem: &mut FileSystem<D>,
+        id: u32,
+    ) -> Result<()> {
+        let node_ptr = TreePtr::<Node>::new(id);
+        let mut node = filesystem
+            .tx(|tx| tx.read_tree(node_ptr))
+            .expect("Expected to be able to get node data");
+
+        if let Some(uid) = self.uid {
+            if node.data().uid() != uid {
+                node.data_mut().set_uid(uid);
+            }
+        }
+
+        if let Some(gid) = self.gid {
+            if node.data().gid() != gid {
+                node.data_mut().set_gid(gid);
+            }
+        }
+
+        if let Some(mode) = self.mode {
+            if node.data().mode() & Node::MODE_PERM != (mode as u16) & Node::MODE_PERM {
+                let new_mode =
+                    node.data().mode() & Node::MODE_TYPE | (mode as u16) & Node::MODE_PERM;
+                node.data_mut().set_mode(new_mode);
+            }
+        }
+
+        let is_file = node.data().is_file();
+        filesystem.tx(|tx| tx.sync_tree(node))?;
+
+        if is_file {
+            return Ok(());
+        }
+
+        let mut children = Vec::new();
+        filesystem
+            .tx(|tx| tx.child_nodes(TreePtr::<Node>::new(id), &mut children))
+            .expect("Expected to be able to retrieve child nodes");
+        for child in children {
+            self.recursive_apply_owners_and_perms(filesystem, child.node_ptr().id())
+                .expect("Expected to be able to apply owners and perms");
+        }
+
         Ok(())
     }
 }
@@ -486,5 +561,158 @@ mod test {
         );
         assert_eq!(subdir_node.data().uid(), uid);
         assert_eq!(subdir_node.data().gid(), gid);
+    }
+
+    #[test]
+    fn recursive_chown() {
+        let mut filesystem = create_mock_filesystem();
+        let recursive_chown_dirname = "foo";
+        let recursive_chown_subdirname = "bar";
+        let recursive_chown_dir_filename = "a.txt";
+        let recursive_chown_subdir_filename = "b.txt";
+        let recursive_chown_dirpath = format!("/{recursive_chown_dirname}");
+        let recursive_chown_subdirpath =
+            format!("/{recursive_chown_dirname}/{recursive_chown_subdirname}");
+        let recursive_chown_dir_filepath =
+            format!("/{recursive_chown_dirpath}/{recursive_chown_dir_filename}");
+        let recursive_chown_subdir_filepath =
+            format!("/{recursive_chown_subdirpath}/{recursive_chown_subdir_filename}");
+        let adjacent_dirname = "root";
+        let adjacent_dir_filename = "c.txt";
+        let adjacent_subdirname = "stuff";
+        let adjacent_dirpath = format!("/{adjacent_dirname}");
+        let adjacent_dir_filepath = format!("/{adjacent_dirpath}/{adjacent_dir_filename}");
+        let adjacent_subdirpath = format!("/{adjacent_dirpath}/{adjacent_subdirname}");
+
+        // Create all dirs and files
+        FileConfig::new_directory(recursive_chown_subdirpath)
+            .create(&mut filesystem)
+            .unwrap();
+        FileConfig::new_file(recursive_chown_dir_filepath, "")
+            .create(&mut filesystem)
+            .unwrap();
+        FileConfig::new_file(recursive_chown_subdir_filepath, "")
+            .create(&mut filesystem)
+            .unwrap();
+        FileConfig::new_directory(adjacent_subdirpath)
+            .create(&mut filesystem)
+            .unwrap();
+        FileConfig::new_file(adjacent_dir_filepath, "")
+            .create(&mut filesystem)
+            .unwrap();
+
+        // Apply recursive chown on `/foo` by trying to create the dir once more, but with the
+        // `with_recursive_mod()` method now used to activate the recursive chown for all its
+        // contents
+        let recursive_mode = 0o0123;
+        let recursive_uid = 1234;
+        let recursive_gid = 5678;
+        FileConfig::new_directory(recursive_chown_dirpath)
+            .with_recursive_mod(recursive_mode, recursive_uid, recursive_gid)
+            .create(&mut filesystem)
+            .unwrap();
+
+        // Check `/foo` shows the effects of the recursive chown
+        let recursive_chown_dir_node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::root(), recursive_chown_dirname))
+            .unwrap();
+        assert_eq!(
+            recursive_chown_dir_node.data().mode() & Node::MODE_PERM,
+            recursive_mode as u16 & Node::MODE_PERM
+        );
+        assert!(recursive_chown_dir_node.data().is_dir());
+        assert_eq!(recursive_chown_dir_node.data().uid(), recursive_uid);
+        assert_eq!(recursive_chown_dir_node.data().gid(), recursive_gid);
+
+        // Check `/foo/a.txt` shows the effects of the recursive chown
+        let recursive_chown_dir_file_node = filesystem
+            .tx(|tx| {
+                tx.find_node(
+                    TreePtr::<Node>::new(recursive_chown_dir_node.id()),
+                    recursive_chown_dir_filename,
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            recursive_chown_dir_file_node.data().mode() & Node::MODE_PERM,
+            recursive_mode as u16 & Node::MODE_PERM
+        );
+        assert_eq!(recursive_chown_dir_file_node.data().uid(), recursive_uid);
+        assert_eq!(recursive_chown_dir_file_node.data().gid(), recursive_gid);
+
+        // Check `/foo/bar` shows the effects of the recursive chown
+        let recursive_chown_subdir_node = filesystem
+            .tx(|tx| {
+                tx.find_node(
+                    TreePtr::<Node>::new(recursive_chown_dir_node.id()),
+                    recursive_chown_subdirname,
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            recursive_chown_subdir_node.data().mode() & Node::MODE_PERM,
+            recursive_mode as u16 & Node::MODE_PERM
+        );
+        assert_eq!(recursive_chown_subdir_node.data().uid(), recursive_uid);
+        assert_eq!(recursive_chown_subdir_node.data().gid(), recursive_gid);
+
+        // Check `/foo/bar/b.txt` shows the effects of the recursive chown
+        let recursive_chown_subdir_file_node = filesystem
+            .tx(|tx| {
+                tx.find_node(
+                    TreePtr::<Node>::new(recursive_chown_subdir_node.id()),
+                    recursive_chown_subdir_filename,
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            recursive_chown_subdir_file_node.data().mode() & Node::MODE_PERM,
+            recursive_mode as u16 & Node::MODE_PERM
+        );
+        assert_eq!(recursive_chown_subdir_file_node.data().uid(), recursive_uid);
+        assert_eq!(recursive_chown_subdir_file_node.data().gid(), recursive_gid);
+
+        // Check `/root` is unaffected by the recursive chown
+        let adjacent_dir_node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::root(), adjacent_dirname))
+            .unwrap();
+        assert_eq!(
+            adjacent_dir_node.data().mode() & Node::MODE_PERM,
+            0o0755 & Node::MODE_PERM
+        );
+        assert_eq!(adjacent_dir_node.data().uid(), 0);
+        assert_eq!(adjacent_dir_node.data().gid(), 0);
+
+        // Check `/root/c.txt` is unaffected by the recursive chown
+        let adjacent_dir_file_node = filesystem
+            .tx(|tx| {
+                tx.find_node(
+                    TreePtr::<Node>::new(adjacent_dir_node.id()),
+                    adjacent_dir_filename,
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            adjacent_dir_file_node.data().mode() & Node::MODE_PERM,
+            0o0644 & Node::MODE_PERM
+        );
+        assert_eq!(adjacent_dir_file_node.data().uid(), !0);
+        assert_eq!(adjacent_dir_file_node.data().gid(), !0);
+
+        // Check `/root/stuff` is unaffected by the recursive chown
+        let adjacent_subdir_node = filesystem
+            .tx(|tx| {
+                tx.find_node(
+                    TreePtr::<Node>::new(adjacent_dir_node.id()),
+                    adjacent_subdirname,
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            adjacent_subdir_node.data().mode() & Node::MODE_PERM,
+            0o0755 & Node::MODE_PERM
+        );
+        assert_eq!(adjacent_subdir_node.data().uid(), !0);
+        assert_eq!(adjacent_subdir_node.data().gid(), !0);
     }
 }
