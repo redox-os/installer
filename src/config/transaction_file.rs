@@ -73,14 +73,19 @@ impl FileConfig {
             match dir {
                 Component::RootDir => continue,
                 Component::Normal(subdir) => {
-                    let node = filesystem.tx(|tx| {
-                        tx.find_node(
+                    let subdir = subdir.to_str().expect(&format!(
+                        "Expected subdir name to be valid utf-8: {:?}",
+                        subdir
+                    ));
+                    let node = filesystem.tx(|tx| match tx.find_node(parent_ptr, subdir) {
+                        Ok(node) => Ok(node),
+                        Err(_) => tx.create_node(
                             parent_ptr,
-                            subdir.to_str().expect(&format!(
-                                "Expected subdir name to be valid utf-8: {:?}",
-                                subdir
-                            )),
-                        )
+                            subdir,
+                            Node::MODE_DIR | 0o0755 & Node::MODE_PERM,
+                            ctime.as_secs(),
+                            ctime.subsec_nanos(),
+                        ),
                     })?;
                     parent_id = node.id();
                 }
@@ -252,6 +257,35 @@ mod test {
             .tx(|tx| tx.find_node(TreePtr::<Node>::new(dir_node.id()), filename))
             .unwrap();
         assert!(file_node.data().is_file());
+        let mut buf = [0; 13];
+        filesystem
+            .tx(|tx| tx.read_node(TreePtr::<Node>::new(file_node.id()), 0, &mut buf, 1, 0))
+            .unwrap();
+        assert_eq!(&buf, data.as_bytes());
+    }
+
+    #[test]
+    fn write_file_node_parents_if_non_existent() {
+        let mut filesystem = create_mock_filesystem();
+        let filename = "foo.txt";
+        let dirname = "dir";
+        let subdirname = "subdir";
+        let filepath = format!("/{dirname}/{subdirname}/{filename}");
+        let data = "Hello, world!";
+        FileConfig::new_file(filepath, data)
+            .create(&mut filesystem)
+            .unwrap();
+        let dir_node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::root(), dirname))
+            .unwrap();
+        assert!(dir_node.data().is_dir());
+        let subdir_node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::new(dir_node.id()), subdirname))
+            .unwrap();
+        assert!(subdir_node.data().is_dir());
+        let file_node = filesystem
+            .tx(|tx| tx.find_node(TreePtr::<Node>::new(subdir_node.id()), filename))
+            .unwrap();
         let mut buf = [0; 13];
         filesystem
             .tx(|tx| tx.read_node(TreePtr::<Node>::new(file_node.id()), 0, &mut buf, 1, 0))
