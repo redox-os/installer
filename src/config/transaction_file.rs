@@ -5,6 +5,7 @@ use std::{
 };
 
 use redoxfs::{Disk, FileSystem, Node, TreePtr};
+use syscall::EEXIST;
 
 use crate::Result;
 
@@ -139,7 +140,7 @@ impl FileConfig {
             OsStr::new("/")
         };
         filesystem.tx(|tx| {
-            tx.create_node(
+            match tx.create_node(
                 TreePtr::<Node>::new(parent_id),
                 dirname.to_str().expect(&format!(
                     "Expected dirname io be valid utf-8: {:?}",
@@ -148,7 +149,17 @@ impl FileConfig {
                 Node::MODE_DIR | self.mode.unwrap_or(0o0755) as u16 & Node::MODE_PERM,
                 ctime.as_secs(),
                 ctime.subsec_nanos(),
-            )
+            ) {
+                Ok(_) => Ok(()),
+                Err(err) => {
+                    if err.errno != EEXIST {
+                        Err(err)
+                    } else {
+                        println!("Directory already exists: {}", self.path);
+                        Ok(())
+                    }
+                }
+            }
         })?;
         self.apply_owners(filesystem, parent_id, dirname)?;
 
@@ -475,6 +486,15 @@ mod test {
                 _ => panic!(),
             }
         }
+    }
+
+    #[test]
+    fn create_same_dir_doesnt_fail() {
+        let mut filesystem = create_mock_filesystem();
+        let dirpath = "/dir/subdir";
+        let file_config = FileConfig::new_directory(dirpath);
+        file_config.create(&mut filesystem).unwrap();
+        file_config.create(&mut filesystem).unwrap();
     }
 
     #[test]
