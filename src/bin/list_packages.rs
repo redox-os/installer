@@ -41,11 +41,10 @@ fn main() {
     let merged_toml = toml::to_string_pretty(&config).unwrap();
 
     // Add filesystem.toml to config
-    config.files.push(redox_installer::FileConfig {
-        path: "filesystem.toml".to_string(),
-        data: merged_toml,
-        ..Default::default()
-    });
+    config.files.push(redox_installer::FileConfig::new_file(
+        "filesystem.toml".to_string(),
+        merged_toml,
+    ));
 
     // Add command line flags to config, command line takes priority
     if repo_binary {

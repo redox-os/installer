@@ -4,15 +4,15 @@ extern crate serde_derive;
 mod config;
 mod disk_wrapper;
 
-pub use crate::config::file::FileConfig;
 pub use crate::config::package::PackageConfig;
+pub use crate::config::transaction_file::FileConfig;
 pub use crate::config::Config;
 use crate::disk_wrapper::DiskWrapper;
 
 use anyhow::{anyhow, bail, Context, Result};
 use pkg::Library;
 use rand::{rngs::OsRng, TryRngCore};
-use redoxfs::{unmount_path, Disk, DiskIo, FileSystem};
+use redoxfs::{Disk, DiskIo, FileSystem};
 use termion::input::TermRead;
 
 use std::{
@@ -23,8 +23,6 @@ use std::{
     path::{Path, PathBuf},
     process,
     rc::Rc,
-    sync::mpsc::channel,
-    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -200,10 +198,10 @@ fn install_remote_packages(dest: &str, library: &mut Library, remote_packages: V
     library.apply().unwrap();
 }
 
-pub fn install_dir(
+pub fn install_dir<D: Disk>(
     config: Config,
-    output_dir: impl AsRef<Path>,
     cookbook: Option<&str>,
+    mut fs: FileSystem<D>,
 ) -> Result<()> {
     //let mut context = liner::Context::new();
 
@@ -228,21 +226,18 @@ pub fn install_dir(
         };
     }
 
-    let output_dir = output_dir.as_ref();
-
-    let output_dir = output_dir.to_owned();
-
     for file in &config.files {
         if !file.postinstall {
-            file.create(&output_dir)?;
+            file.create(&mut fs)?;
         }
     }
 
-    install_packages(&config, output_dir.to_str().unwrap(), cookbook);
+    // TODO: how to migrate this to using the transaction API?
+    // install_packages(&config, output_dir.to_str().unwrap(), cookbook);
 
     for file in &config.files {
         if file.postinstall {
-            file.create(&output_dir)?;
+            file.create(&mut fs)?;
         }
     }
 
@@ -309,7 +304,7 @@ pub fn install_dir(
 
         FileConfig::new_directory(home.clone())
             .with_recursive_mod(0o777, uid, gid)
-            .create(&output_dir)?;
+            .create(&mut fs)?;
 
         if uid >= 1000 {
             // Create XDG user dirs
@@ -331,7 +326,7 @@ pub fn install_dir(
             ] {
                 FileConfig::new_directory(format!("{}/{}", home, xdg_folder))
                     .with_mod(0o0700, uid, gid)
-                    .create(&output_dir)?;
+                    .create(&mut fs)?;
             }
 
             FileConfig::new_file(
@@ -349,7 +344,7 @@ XDG_VIDEOS_DIR="$HOME/Videos"
                 .to_string(),
             )
             .with_mod(0o0600, uid, gid)
-            .create(&output_dir)?;
+            .create(&mut fs)?;
         }
 
         let password = hash_password(&password)?;
@@ -372,13 +367,13 @@ XDG_VIDEOS_DIR="$HOME/Videos"
     }
 
     if !passwd.is_empty() {
-        FileConfig::new_file("/etc/passwd".to_string(), passwd).create(&output_dir)?;
+        FileConfig::new_file("/etc/passwd".to_string(), passwd).create(&mut fs)?;
     }
 
     if !shadow.is_empty() {
         FileConfig::new_file("/etc/shadow".to_string(), shadow)
             .with_mod(0o0600, 0, 0)
-            .create(&output_dir)?;
+            .create(&mut fs)?;
     }
 
     if !groups.is_empty() {
@@ -395,7 +390,7 @@ XDG_VIDEOS_DIR="$HOME/Videos"
 
         FileConfig::new_file("/etc/group".to_string(), groups_data)
             .with_mod(0o0600, 0, 0)
-            .create(&output_dir)?;
+            .create(&mut fs)?;
     }
 
     Ok(())
@@ -410,62 +405,6 @@ where
     let fs = FileSystem::create(disk, password_opt, ctime.as_secs(), ctime.subsec_nanos())
         .map_err(syscall_error)?;
     callback(fs)
-}
-
-pub fn with_redoxfs_mount<D, T, F>(fs: FileSystem<D>, callback: F) -> Result<T>
-where
-    D: Disk + Send + 'static,
-    F: FnOnce(&Path) -> Result<T>,
-{
-    let mount_path = if cfg!(target_os = "redox") {
-        format!("file.redox_installer_{}", process::id())
-    } else {
-        format!("/tmp/redox_installer_{}", process::id())
-    };
-
-    if cfg!(not(target_os = "redox")) && !Path::new(&mount_path).exists() {
-        fs::create_dir(&mount_path)?;
-    }
-
-    let (tx, rx) = channel();
-    let join_handle = {
-        let mount_path = mount_path.clone();
-        thread::spawn(move || {
-            let res = redoxfs::mount(fs, &mount_path, |real_path| {
-                tx.send(Ok(real_path.to_owned())).unwrap();
-            });
-            match res {
-                Ok(()) => (),
-                Err(err) => {
-                    tx.send(Err(err)).unwrap();
-                }
-            };
-        })
-    };
-
-    let res = match rx.recv() {
-        Ok(ok) => match ok {
-            Ok(real_path) => callback(&real_path),
-            Err(err) => return Err(err.into()),
-        },
-        Err(_) => {
-            return Err(io::Error::new(
-                io::ErrorKind::NotConnected,
-                "redoxfs thread did not send a result",
-            )
-            .into())
-        }
-    };
-
-    unmount_path(&mount_path)?;
-
-    join_handle.join().unwrap();
-
-    if cfg!(not(target_os = "redox")) {
-        fs::remove_dir_all(&mount_path)?;
-    }
-
-    res
 }
 
 pub fn fetch_bootloaders(
@@ -484,7 +423,7 @@ pub fn fetch_bootloaders(
     let mut bootloader_config = Config::default();
     bootloader_config.general = config.general.clone();
     // Ensure a pkgar remote is available
-    FileConfig {
+    crate::config::file::FileConfig {
         path: "/etc/pkg.d/50_redox".to_string(),
         data: "https://static.redox-os.org/pkg".to_string(),
         ..Default::default()
@@ -809,7 +748,8 @@ fn install_inner(
     println!("Install {config:#?} to {}", output.display());
 
     if output.is_dir() {
-        install_dir(config, output, cookbook)
+        // TODO: will this option be needed if migrated to using the transaction API?
+        todo!()
     } else {
         let (bootloader_bios, bootloader_efi) = fetch_bootloaders(&config, cookbook, live)?;
         if let Some(write_bootloader) = write_bootloader {
@@ -823,9 +763,7 @@ fn install_inner(
             skip_partitions: config.general.skip_partitions.unwrap_or(false),
         };
         with_whole_disk(output, &disk_option, move |fs| {
-            with_redoxfs_mount(fs, move |mount_path| {
-                install_dir(config, mount_path, cookbook)
-            })
+            install_dir(config, cookbook, fs)
         })
     }
 }

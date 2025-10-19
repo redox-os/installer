@@ -23,7 +23,7 @@ pub struct FileConfig {
     #[serde(default)]
     recursive_chown: bool,
     #[serde(default)]
-    postinstall: bool,
+    pub postinstall: bool,
 }
 
 impl FileConfig {

@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use pkgar::{ext::EntryExt, PackageHead};
 use pkgar_core::PackageSrc;
 use pkgar_keys::PublicKeyFile;
-use redox_installer::{try_fast_install, with_redoxfs_mount, with_whole_disk, Config, DiskOption};
+use redox_installer::{try_fast_install, with_whole_disk, Config, DiskOption};
 use std::{
     ffi::OsStr,
     fs,
@@ -337,42 +337,45 @@ fn main() {
             return Ok(());
         }
 
+        Ok(())
+
+        // TODO: figure out how to deal with this, maybe it would ultimately be removed completely?
         // Slow install method via file copy
-        with_redoxfs_mount(fs, |mount_path| {
-            let mut config: Config = Config::from_file(&root_path.join("filesystem.toml"))?;
-
-            // Copy filesystem.toml, which is not packaged
-            let mut files = vec!["filesystem.toml".to_string()];
-
-            // Copy files from locally installed packages
-            package_files(&root_path, &mut config, &mut files)
-                // TODO: implement Error trait
-                .map_err(|err| anyhow!("failed to read package files: {err}"))?;
-
-            // Perform config install (after packages have been converted to files)
-            eprintln!("configuring system");
-            let cookbook: Option<&'static str> = None;
-            redox_installer::install_dir(config, mount_path, cookbook)
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
-
-            // Sort and remove duplicates
-            files.sort();
-            files.dedup();
-
-            // Install files
-            let mut buf = vec![0; 4 * MIB as usize];
-            for (i, name) in files.iter().enumerate() {
-                eprintln!("copy {} [{}/{}]", name, i, files.len());
-
-                let src = root_path.join(name);
-                let dest = mount_path.join(name);
-                copy_file(&src, &dest, &mut buf)?;
-            }
-
-            eprintln!("finished installing, unmounting filesystem");
-
-            Ok(())
-        })
+        // with_redoxfs_mount(fs, |mount_path| {
+        //     let mut config: Config = Config::from_file(&root_path.join("filesystem.toml"))?;
+        //
+        //     // Copy filesystem.toml, which is not packaged
+        //     let mut files = vec!["filesystem.toml".to_string()];
+        //
+        //     // Copy files from locally installed packages
+        //     package_files(&root_path, &mut config, &mut files)
+        //         // TODO: implement Error trait
+        //         .map_err(|err| anyhow!("failed to read package files: {err}"))?;
+        //
+        //     // Perform config install (after packages have been converted to files)
+        //     eprintln!("configuring system");
+        //     let cookbook: Option<&'static str> = None;
+        //     redox_installer::install_dir(config, mount_path, cookbook)
+        //         .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+        //
+        //     // Sort and remove duplicates
+        //     files.sort();
+        //     files.dedup();
+        //
+        //     // Install files
+        //     let mut buf = vec![0; 4 * MIB as usize];
+        //     for (i, name) in files.iter().enumerate() {
+        //         eprintln!("copy {} [{}/{}]", name, i, files.len());
+        //
+        //         let src = root_path.join(name);
+        //         let dest = mount_path.join(name);
+        //         copy_file(&src, &dest, &mut buf)?;
+        //     }
+        //
+        //     eprintln!("finished installing, unmounting filesystem");
+        //
+        //     Ok(())
+        // })
     });
 
     match res {
