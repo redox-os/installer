@@ -533,7 +533,7 @@ where
 
     let bootloader_efi_name = match target.as_str() {
         "aarch64-unknown-redox" => "BOOTAA64.EFI",
-        "i686-unknown-redox" => "BOOTIA32.EFI",
+        "i586-unknown-redox" | "i686-unknown-redox" => "BOOTIA32.EFI",
         "x86_64-unknown-redox" => "BOOTX64.EFI",
         "riscv64gc-unknown-redox" => "BOOTRISCV64.EFI",
         _ => {
