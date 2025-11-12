@@ -106,7 +106,7 @@ fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &s
 }
 
 fn get_head_path(packagename: &str, dest: &str) -> PathBuf {
-    let head_path = PathBuf::from(format!("{dest}/pkg/{packagename}.pkgar_head"));
+    let head_path = PathBuf::from(format!("{dest}/pkg/packages/{packagename}.pkgar_head"));
     head_path
 }
 
@@ -118,12 +118,12 @@ fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
     let mut library = Library::new(dest, target, Rc::new(RefCell::new(callback))).unwrap();
 
     if let Some(cookbook) = cookbook {
-        let dest_pkg = format!("{}/pkg", dest);
         let mut local_packages = Vec::new();
         let mut remote_packages = Vec::new();
         let default_is_remote = config.general.repo_binary.unwrap_or(false);
-        if !Path::new(&dest_pkg).exists() {
-            fs::create_dir(&dest_pkg).unwrap();
+        let dest_pkg = format!("{}/pkg/packages", dest);
+        if !Path::new(&dest_pkg).is_dir() {
+            fs::create_dir_all(&dest_pkg).unwrap();
         }
 
         for (packagename, package) in &config.packages {
