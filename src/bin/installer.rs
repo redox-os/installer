@@ -52,11 +52,10 @@ fn main() {
     }
 
     // Add filesystem.toml to config
-    config.files.push(redox_installer::FileConfig {
-        path: "filesystem.toml".to_string(),
-        data: merged_toml,
-        ..Default::default()
-    });
+    config.files.push(redox_installer::FileConfig::new_file(
+        "filesystem.toml".to_string(),
+        merged_toml,
+    ));
 
     // Add command line flags to config, command line takes priority
     if repo_binary {
@@ -96,11 +95,10 @@ fn main() {
             let key_path = Path::new(&path).join("build/id_ed25519.pub.toml");
             match fs::read_to_string(&key_path) {
                 Ok(data) => {
-                    config.files.push(redox_installer::FileConfig {
-                        path: "pkg/id_ed25519.pub.toml".to_string(),
+                    config.files.push(redox_installer::FileConfig::new_file(
+                        "pkg/id_ed25519.pub.toml".to_string(),
                         data,
-                        ..Default::default()
-                    });
+                    ));
                     Some(path)
                 }
                 Err(err) => {

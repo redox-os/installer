@@ -9,6 +9,7 @@ use anyhow::Result;
 pub mod file;
 pub mod general;
 pub mod package;
+pub mod transaction_file;
 pub mod user;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -20,7 +21,7 @@ pub struct Config {
     #[serde(default)]
     pub packages: BTreeMap<String, package::PackageConfig>,
     #[serde(default)]
-    pub files: Vec<file::FileConfig>,
+    pub files: Vec<transaction_file::FileConfig>,
     #[serde(default)]
     pub users: BTreeMap<String, user::UserConfig>,
     #[serde(default)]
