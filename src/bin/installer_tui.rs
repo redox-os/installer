@@ -353,7 +353,7 @@ fn main() {
             eprintln!("configuring system");
             let cookbook: Option<&'static str> = None;
             redox_installer::install_dir(config, mount_path, cookbook)
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+                .map_err(|err| io::Error::other(err))?;
 
             // Sort and remove duplicates
             files.sort();
