@@ -16,10 +16,6 @@ path = "src/bin/installer.rs"
 name = "redox_installer_tui"
 path = "src/bin/installer_tui.rs"
 
-[[bin]]
-name = "list_packages"
-path = "src/bin/list_packages.rs"
-
 [lib]
 name = "redox_installer"
 path = "src/lib.rs"

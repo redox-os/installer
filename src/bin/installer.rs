@@ -3,18 +3,14 @@ extern crate redox_installer;
 extern crate serde;
 extern crate toml;
 
-use std::io::Write;
 use std::path::Path;
-use std::{env, fs, io, process};
+use std::{env, fs, process};
 
 use arg_parser::ArgParser;
 
 use redox_installer::{Config, PackageConfig};
 
 fn main() {
-    let stderr = io::stderr();
-    let mut stderr = stderr.lock();
-
     let mut parser = ArgParser::new(4)
         .add_opt("b", "cookbook")
         .add_opt("c", "config")
@@ -34,7 +30,7 @@ fn main() {
         match Config::from_file(Path::new(&path)) {
             Ok(config) => config,
             Err(err) => {
-                writeln!(stderr, "installer: {err}").unwrap();
+                eprintln!("installer: {err}");
                 process::exit(1);
             }
         }
@@ -69,26 +65,18 @@ fn main() {
         // List the packages that should be fetched or built by the cookbook
         for (packagename, package) in &config.packages {
             match package {
-                PackageConfig::Build(rule) if rule == "recipe" || rule == "source" => {
-                    println!("{}", packagename);
-                }
-                PackageConfig::Build(rule) if rule == "binary" || rule == "ignore" => {
+                PackageConfig::Build(rule) if rule == "ignore" => {
                     // skip this package
                 }
                 _ => {
-                    if config.general.repo_binary == Some(true) {
-                        // default action is to not build this package, skip it
-                    } else {
-                        // default action is to build
-                        println!("{}", packagename);
-                    }
+                    println!("{}", packagename);
                 }
             }
         }
     } else {
         let cookbook = if let Some(path) = parser.get_opt("cookbook") {
             if !Path::new(&path).is_dir() {
-                writeln!(stderr, "installer: {}: cookbook not found", path).unwrap();
+                eprintln!("installer: {}: cookbook not found", path);
                 process::exit(1);
             }
 
@@ -119,22 +107,18 @@ fn main() {
                             _ => true,
                         })
                     {
-                        writeln!(
-                            stderr,
+                        eprintln!(
                             "installer: {}: failed to read cookbook key: {}",
                             key_path.display(),
                             err
-                        )
-                        .unwrap();
+                        );
                         process::exit(1);
                     } else {
-                        writeln!(
-                            stderr,
+                        eprintln!(
                             "installer: {}: (non-fatal) missing cookbook key: {}",
                             key_path.display(),
                             err
-                        )
-                        .unwrap();
+                        );
                         None
                     }
                 }
@@ -151,11 +135,11 @@ fn main() {
                 parser.found("live"),
                 parser.get_opt("write-bootloader").as_deref(),
             ) {
-                writeln!(stderr, "installer: failed to install: {}", err).unwrap();
+                eprintln!("installer: failed to install: {}", err);
                 process::exit(1);
             }
         } else {
-            writeln!(stderr, "installer: output or list-packages not found").unwrap();
+            eprintln!("installer: output or list-packages not found");
             process::exit(1);
         }
     }
