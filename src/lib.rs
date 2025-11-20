@@ -9,7 +9,9 @@ pub use crate::config::package::PackageConfig;
 pub use crate::config::Config;
 use crate::disk_wrapper::DiskWrapper;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Result};
+#[cfg(target_os = "redox")]
+use anyhow::{anyhow};
 use pkg::Library;
 use rand::{rngs::OsRng, TryRngCore};
 use redoxfs::{unmount_path, Disk, DiskIo, FileSystem};
