@@ -10,7 +10,7 @@ pub use crate::config::Config;
 use crate::disk_wrapper::DiskWrapper;
 
 #[cfg(target_os = "redox")]
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use anyhow::{bail, Result};
 use pkg::Library;
 use rand::{rngs::OsRng, TryRngCore};
