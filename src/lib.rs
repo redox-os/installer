@@ -79,7 +79,7 @@ fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
     Ok(password.unwrap_or("".to_string()))
 }
 
-fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &str) -> Result<()> {
+fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &Path) -> Result<()> {
     let head_path = get_head_path(packagename, dest);
 
     let public_path = format!("{cookbook}/build/id_ed25519.pub.toml",);
@@ -89,8 +89,8 @@ fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &s
     let pkginfo = pkg::Package::from_toml(&fs::read_to_string(pkginfo_path)?)?;
 
     if pkginfo.version != "" {
-        pkgar::extract(&public_path, &pkgar_path, dest).unwrap();
-        pkgar::split(&public_path, &pkgar_path, head_path, Option::<&str>::None).unwrap();
+        pkgar::extract(&public_path, &pkgar_path, dest)?;
+        pkgar::split(&public_path, &pkgar_path, head_path, Option::<&str>::None)?;
     }
 
     // Recursively install any runtime dependencies.
@@ -105,99 +105,47 @@ fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &s
     Ok(())
 }
 
-fn get_head_path(packagename: &str, dest: &str) -> PathBuf {
-    let head_path = PathBuf::from(format!("{dest}/pkg/packages/{packagename}.pkgar_head"));
-    head_path
+fn get_head_path(packagename: &str, dest: &Path) -> PathBuf {
+    dest.join(format!("pkg/packages/{packagename}.pkgar_head"))
 }
 
-//TODO: error handling
-fn install_packages(config: &Config, dest: &str, cookbook: Option<&str>) {
+fn install_packages(config: &Config, dest: &Path, cookbook: Option<&str>) -> anyhow::Result<()> {
     let target = &get_target();
 
     let callback = pkg::callback::IndicatifCallback::new();
-    let mut library = Library::new(dest, target, Rc::new(RefCell::new(callback))).unwrap();
+
+    let packages: Vec<&String> = config
+        .packages
+        .iter()
+        .filter_map(|(packagename, package)| match package {
+            PackageConfig::Build(rule) if rule == "ignore" => None,
+            _ => Some(packagename),
+        })
+        .collect();
 
     if let Some(cookbook) = cookbook {
-        let mut local_packages = Vec::new();
-        let mut remote_packages = Vec::new();
-        let default_is_remote = config.general.repo_binary.unwrap_or(false);
-        let dest_pkg = format!("{}/pkg/packages", dest);
+        let dest_pkg = dest.join("pkg/packages");
         if !Path::new(&dest_pkg).is_dir() {
-            fs::create_dir_all(&dest_pkg).unwrap();
+            fs::create_dir_all(&dest_pkg)?;
         }
-
-        for (packagename, package) in &config.packages {
-            enum Rule {
-                RemotePrebuilt,
-                Build,
-                Ignore,
+        for packagename in packages {
+            if !get_head_path(packagename, dest).exists() {
+                println!("Installing package from local repo: {}", packagename);
+                install_local_pkgar(cookbook, target, packagename, dest)?;
             }
-
-            let rule = match (default_is_remote, package) {
-                (
-                    true,
-                    PackageConfig::Empty
-                    | PackageConfig::Spec {
-                        version: None,
-                        git: None,
-                        path: None,
-                    },
-                ) => Rule::RemotePrebuilt,
-                (_, PackageConfig::Build(rule)) if rule == "binary" => Rule::RemotePrebuilt,
-                (_, PackageConfig::Build(rule)) if rule == "ignore" => Rule::Ignore,
-                _ => Rule::Build,
-            };
-
-            match rule {
-                Rule::RemotePrebuilt => {
-                    remote_packages.push(packagename);
-                }
-                Rule::Build => {
-                    local_packages.push(packagename);
-                }
-                Rule::Ignore => {
-                    // do nothing, not even logging it
-                }
-            }
-        }
-
-        // overrided packages source must be installed first
-        if default_is_remote {
-            install_local_packages(dest, target, local_packages, cookbook);
-            install_remote_packages(dest, &mut library, remote_packages);
-        } else {
-            install_remote_packages(dest, &mut library, remote_packages);
-            install_local_packages(dest, target, local_packages, cookbook);
         }
     } else {
-        install_remote_packages(dest, &mut library, config.packages.keys().collect());
-    }
-}
-
-fn install_local_packages(
-    dest: &str,
-    target: &String,
-    local_packages: Vec<&String>,
-    cookbook: &str,
-) {
-    for packagename in local_packages {
-        if !get_head_path(packagename, dest).exists() {
-            println!("Installing package from local repo: {}", packagename);
-            install_local_pkgar(cookbook, target, packagename, dest).unwrap();
+        let mut library = Library::new(dest, target, Rc::new(RefCell::new(callback)))?;
+        for packagename in packages {
+            if !get_head_path(packagename, dest).exists() {
+                println!("Installing package from remote: {packagename}");
+                library.install(vec![pkg::PackageName::new(packagename)?])?;
+            }
         }
+        library.apply()?;
     }
-}
 
-fn install_remote_packages(dest: &str, library: &mut Library, remote_packages: Vec<&String>) {
-    for packagename in remote_packages {
-        if !get_head_path(packagename, dest).exists() {
-            println!("Installing package from remote: {packagename}");
-            library
-                .install(vec![pkg::PackageName::new(packagename).unwrap()])
-                .unwrap();
-        }
-    }
-    library.apply().unwrap();
+    Ok(())
 }
 
 pub fn install_dir(
@@ -238,7 +186,7 @@ pub fn install_dir(
         }
     }
 
-    install_packages(&config, output_dir.to_str().unwrap(), cookbook);
+    install_packages(&config, &output_dir, cookbook)?;
 
     for file in &config.files {
         if file.postinstall {
@@ -386,7 +334,7 @@ XDG_VIDEOS_DIR="$HOME/Videos"
 
         for (name, gid, members) in groups {
             use std::fmt::Write;
-            writeln!(groups_data, "{name};x;{gid};{}", members.join(",")).unwrap();
+            writeln!(groups_data, "{name};x;{gid};{}", members.join(","))?;
 
             println!("Adding group {name}:");
             println!("\tGID: {gid}");
@@ -473,9 +421,10 @@ pub fn fetch_bootloaders(
     cookbook: Option<&str>,
     live: bool,
 ) -> Result<(Vec<u8>, Vec<u8>)> {
-    let bootloader_dir = format!("/tmp/redox_installer_bootloader_{}", process::id());
+    let bootloader_dir =
+        PathBuf::from(format!("/tmp/redox_installer_bootloader_{}", process::id()));
 
-    if Path::new(&bootloader_dir).exists() {
+    if bootloader_dir.exists() {
         fs::remove_dir_all(&bootloader_dir)?;
     }
 
@@ -493,9 +442,9 @@ pub fn fetch_bootloaders(
     bootloader_config
         .packages
         .insert("bootloader".to_string(), PackageConfig::default());
-    install_packages(&bootloader_config, &bootloader_dir, cookbook);
+    install_packages(&bootloader_config, &bootloader_dir, cookbook)?;
 
-    let boot_dir = Path::new(&bootloader_dir).join("boot");
+    let boot_dir = bootloader_dir.join("boot");
     let bios_path = boot_dir.join(if live {
         "bootloader-live.bios"
     } else {
@@ -813,7 +762,7 @@ fn install_inner(
     } else {
         let (bootloader_bios, bootloader_efi) = fetch_bootloaders(&config, cookbook, live)?;
         if let Some(write_bootloader) = write_bootloader {
-            std::fs::write(write_bootloader, &bootloader_efi).unwrap();
+            std::fs::write(write_bootloader, &bootloader_efi)?;
         }
         let disk_option = DiskOption {
             bootloader_bios: &bootloader_bios,
