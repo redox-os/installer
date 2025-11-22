@@ -1,14 +1,3 @@
-#[macro_use]
-extern crate serde_derive;
-
-mod config;
-mod disk_wrapper;
-
-pub use crate::config::file::FileConfig;
-pub use crate::config::package::PackageConfig;
-pub use crate::config::Config;
-use crate::disk_wrapper::DiskWrapper;
-
 #[cfg(target_os = "redox")]
 use anyhow::{anyhow, Context};
 use anyhow::{bail, Result};
@@ -16,6 +5,11 @@ use pkg::Library;
 use rand::{rngs::OsRng, TryRngCore};
 use redoxfs::{unmount_path, Disk, DiskIo, FileSystem};
 use termion::input::TermRead;
+
+use crate::config::file::FileConfig;
+use crate::config::package::PackageConfig;
+use crate::config::Config;
+use crate::disk_wrapper::DiskWrapper;
 
 use std::{
     cell::RefCell,
