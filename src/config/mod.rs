@@ -7,6 +7,8 @@ use anyhow::bail;
 use anyhow::Result;
 
 pub mod file;
+#[cfg(feature = "installer")]
+pub mod file_impl;
 pub mod general;
 pub mod package;
 pub mod user;
