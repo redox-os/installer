@@ -338,7 +338,7 @@ fn main() {
         }
 
         // Slow install method via file copy
-        with_redoxfs_mount(fs, |mount_path| {
+        with_redoxfs_mount(fs, None, |mount_path| {
             let mut config: Config = Config::from_file(&root_path.join("filesystem.toml"))?;
 
             // Copy filesystem.toml, which is not packaged

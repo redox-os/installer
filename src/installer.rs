@@ -356,18 +356,29 @@ where
     callback(fs)
 }
 
-pub fn with_redoxfs_mount<D, T, F>(fs: FileSystem<D>, callback: F) -> Result<T>
+fn decide_mount_path(mount_path: Option<&Path>) -> PathBuf {
+    let mount_path = mount_path.map(|p| p.to_path_buf()).unwrap_or_else(|| {
+        PathBuf::from(if cfg!(target_os = "redox") {
+            format!("file.redox_installer_{}", process::id())
+        } else {
+            format!("/tmp/redox_installer_{}", process::id())
+        })
+    });
+    mount_path
+}
+
+pub fn with_redoxfs_mount<D, T, F>(
+    fs: FileSystem<D>,
+    mount_path: Option<&Path>,
+    callback: F,
+) -> Result<T>
 where
     D: Disk + Send + 'static,
     F: FnOnce(&Path) -> Result<T>,
 {
-    let mount_path = if cfg!(target_os = "redox") {
-        format!("file.redox_installer_{}", process::id())
-    } else {
-        format!("/tmp/redox_installer_{}", process::id())
-    };
+    let mount_path = decide_mount_path(mount_path);
 
-    if cfg!(not(target_os = "redox")) && !Path::new(&mount_path).exists() {
+    if cfg!(not(target_os = "redox")) && !mount_path.exists() {
         fs::create_dir(&mount_path)?;
     }
 
@@ -401,7 +412,7 @@ where
         }
     };
 
-    unmount_path(&mount_path)?;
+    unmount_path(&mount_path.as_os_str().to_str().unwrap())?;
 
     join_handle.join().unwrap();
 
@@ -412,16 +423,16 @@ where
     res
 }
 
-pub fn with_redoxfs_ar<D, T, F>(mut fs: FileSystem<D>, callback: F) -> Result<T>
+pub fn with_redoxfs_ar<D, T, F>(
+    mut fs: FileSystem<D>,
+    mount_path: Option<&Path>,
+    callback: F,
+) -> Result<T>
 where
     D: Disk + Send + 'static,
     F: FnOnce(&Path) -> Result<T>,
 {
-    let mount_path = if cfg!(target_os = "redox") {
-        format!("file.redox_installer_{}", process::id())
-    } else {
-        format!("/tmp/redox_installer_{}", process::id())
-    };
+    let mount_path = decide_mount_path(mount_path);
 
     let res = callback(Path::new(&mount_path));
 
@@ -828,11 +839,11 @@ fn install_inner(config: Config, output: &Path) -> Result<()> {
         };
         with_whole_disk(output, &disk_option, move |fs| {
             if config.general.no_mount.unwrap_or(false) {
-                with_redoxfs_ar(fs, move |mount_path| {
+                with_redoxfs_ar(fs, None, move |mount_path| {
                     install_dir(config, mount_path, cookbook)
                 })
             } else {
-                with_redoxfs_mount(fs, move |mount_path| {
+                with_redoxfs_mount(fs, None, move |mount_path| {
                     install_dir(config, mount_path, cookbook)
                 })
             }
