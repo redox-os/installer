@@ -19,7 +19,8 @@ fn main() {
         .add_flag(&["filesystem-size"])
         .add_flag(&["r", "repo-binary"])
         .add_flag(&["l", "list-packages"])
-        .add_flag(&["live"]);
+        .add_flag(&["live"])
+        .add_flag(&["no-mount"]);
     parser.parse(env::args());
 
     // Use pre-built binaries for packages as the default.
@@ -127,14 +128,22 @@ fn main() {
             None
         };
 
+        if cookbook.is_some() {
+            config.general.cookbook = cookbook;
+        }
+        if parser.found("live") {
+            config.general.live_disk = Some(true);
+        }
+        if parser.found("no-mount") {
+            config.general.no_mount = Some(true);
+        }
+        let write_bootloader = parser.get_opt("write-bootloader");
+        if write_bootloader.is_some() {
+            config.general.write_bootloader = write_bootloader;
+        }
+
         if let Some(path) = parser.args.first() {
-            if let Err(err) = redox_installer::install(
-                config,
-                path,
-                cookbook.as_deref(),
-                parser.found("live"),
-                parser.get_opt("write-bootloader").as_deref(),
-            ) {
+            if let Err(err) = redox_installer::install(config, path) {
                 eprintln!("installer: failed to install: {}", err);
                 process::exit(1);
             }
