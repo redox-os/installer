@@ -953,6 +953,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
+name = "humansize"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cb51c9a029ddc91b07a787f1d86b53ccfa49b0e86688c946ebe8d3555685dd7"
+dependencies = [
+ "libm",
+]
+
+[[package]]
 name = "hyper"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1279,6 +1288,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "58f929b4d672ea937a23a1ab494143d968337a5f47e56d0815df1e0890ddf174"
 
 [[package]]
+name = "libm"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
+
+[[package]]
 name = "libredox"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1407,6 +1422,12 @@ dependencies = [
  "libc",
  "winapi",
 ]
+
+[[package]]
+name = "parse-size"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "487f2ccd1e17ce8c1bfab3a65c89525af41cfad4c8659021a1e9a2aacd73b89b"
 
 [[package]]
 name = "percent-encoding"
@@ -1578,7 +1599,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1697,7 +1718,7 @@ dependencies = [
 
 [[package]]
 name = "redox_installer"
-version = "0.2.37"
+version = "0.2.38"
 dependencies = [
  "anyhow",
  "arg_parser",
@@ -1749,9 +1770,9 @@ dependencies = [
 
 [[package]]
 name = "redoxfs"
-version = "0.8.0"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "063eedabd74ddf71810e72aae1c73f3485ffc7b1e757d9466b9099046c05d7be"
+checksum = "da25f807d736d169077c076bc44837ef250257680a91efedda6891474735a833"
 dependencies = [
  "aes",
  "argon2",
@@ -1761,10 +1782,12 @@ dependencies = [
  "env_logger",
  "fuser",
  "getrandom 0.2.16",
+ "humansize",
  "libc",
  "libredox",
  "log",
  "lz4_flex",
+ "parse-size",
  "range-tree",
  "redox-path",
  "redox-scheme",
@@ -2644,7 +2667,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
