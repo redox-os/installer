@@ -3,7 +3,7 @@ use anyhow::{anyhow, Context};
 use anyhow::{bail, Result};
 use pkg::Library;
 use rand::{rngs::OsRng, TryRngCore};
-use redoxfs::{unmount_path, Disk, DiskIo, FileSystem};
+use redoxfs::{unmount_path, Disk, DiskIo, FileSystem, BLOCK_SIZE};
 use termion::input::TermRead;
 
 use crate::config::file::FileConfig;
@@ -412,6 +412,67 @@ where
     res
 }
 
+pub fn with_redoxfs_ar<D, T, F>(mut fs: FileSystem<D>, callback: F) -> Result<T>
+where
+    D: Disk + Send + 'static,
+    F: FnOnce(&Path) -> Result<T>,
+{
+    let mount_path = if cfg!(target_os = "redox") {
+        format!("file.redox_installer_{}", process::id())
+    } else {
+        format!("/tmp/redox_installer_{}", process::id())
+    };
+
+    let res = callback(Path::new(&mount_path));
+
+    if res.is_ok() {
+        let _end_block = fs
+            .tx(|tx| {
+                // Archive_at root node
+                redoxfs::archive_at(tx, Path::new(&mount_path), redoxfs::TreePtr::root())
+                    .map_err(|err| syscall::Error::new(err.raw_os_error().unwrap()))?;
+
+                // Squash alloc log
+                tx.sync(true)?;
+
+                let end_block = tx.header.size() / BLOCK_SIZE;
+                /* TODO: Cut off any free blocks at the end of the filesystem
+                let mut end_changed = true;
+                while end_changed {
+                    end_changed = false;
+
+                    let allocator = fs.allocator();
+                    let levels = allocator.levels();
+                    for level in 0..levels.len() {
+                        let level_size = 1 << level;
+                        for &block in levels[level].iter() {
+                            if block < end_block && block + level_size >= end_block {
+                                end_block = block;
+                                end_changed = true;
+                            }
+                        }
+                    }
+                }
+                */
+
+                // Update header
+                tx.header.size = (end_block * BLOCK_SIZE).into();
+                tx.header_changed = true;
+                tx.sync(false)?;
+
+                Ok(end_block)
+            })
+            .map_err(syscall_error)?;
+
+        // let size = (fs.block + end_block) * BLOCK_SIZE;
+        // fs.disk.file.set_len(size)?;
+    }
+
+    fs::remove_dir_all(&mount_path)?;
+
+    res
+}
+
 pub fn fetch_bootloaders(
     config: &Config,
     cookbook: Option<&str>,
@@ -744,42 +805,44 @@ pub fn try_fast_install<D: redoxfs::Disk, F: FnMut(u64, u64)>(
     Ok(true)
 }
 
-fn install_inner(
-    config: Config,
-    output: &Path,
-    cookbook: Option<&str>,
-    live: bool,
-    write_bootloader: Option<&str>,
-) -> Result<()> {
+fn install_inner(config: Config, output: &Path) -> Result<()> {
     println!("Install {config:#?} to {}", output.display());
-
+    let cookbook = config.general.cookbook.clone();
+    let cookbook = cookbook.as_ref().map(|p| p.as_str());
     if output.is_dir() {
         install_dir(config, output, cookbook)
     } else {
+        let live = config.general.live_disk.unwrap_or(false);
+        let password_opt = config.general.encrypt_disk.clone();
+        let password_opt = password_opt.as_ref().map(|p| p.as_bytes());
         let (bootloader_bios, bootloader_efi) = fetch_bootloaders(&config, cookbook, live)?;
-        if let Some(write_bootloader) = write_bootloader {
+        if let Some(write_bootloader) = &config.general.write_bootloader {
             std::fs::write(write_bootloader, &bootloader_efi)?;
         }
         let disk_option = DiskOption {
             bootloader_bios: &bootloader_bios,
             bootloader_efi: &bootloader_efi,
-            password_opt: None,
+            password_opt: password_opt,
             efi_partition_size: config.general.efi_partition_size,
             skip_partitions: config.general.skip_partitions.unwrap_or(false),
         };
         with_whole_disk(output, &disk_option, move |fs| {
-            with_redoxfs_mount(fs, move |mount_path| {
-                install_dir(config, mount_path, cookbook)
-            })
+            if config.general.no_mount.unwrap_or(false) {
+                with_redoxfs_ar(fs, move |mount_path| {
+                    install_dir(config, mount_path, cookbook)
+                })
+            } else {
+                with_redoxfs_mount(fs, move |mount_path| {
+                    install_dir(config, mount_path, cookbook)
+                })
+            }
         })
     }
 }
-pub fn install(
-    config: Config,
-    output: impl AsRef<Path>,
-    cookbook: Option<&str>,
-    live: bool,
-    write_bootloader: Option<&str>,
-) -> Result<()> {
-    install_inner(config, output.as_ref(), cookbook, live, write_bootloader)
+
+/// Install RedoxFS into a new disk file, or a sysroot directory.
+/// This function assumes all interactive prompts resolved by the caller,
+/// so "prompt" option is ignored from this function onward.
+pub fn install(config: Config, output: impl AsRef<Path>) -> Result<()> {
+    install_inner(config, output.as_ref())
 }

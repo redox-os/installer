@@ -22,4 +22,4 @@ cargo-test:
     - cargo build --locked
     - cargo test
     - fallocate -l 256MiB test.bin
-    - ./target/debug/redox_installer -c res/test.toml test.bin
+    - ./target/debug/redox_installer -c res/test.toml test.bin --no-mount

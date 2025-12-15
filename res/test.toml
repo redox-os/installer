@@ -16,8 +16,6 @@ filesystem_size = 256
 
 [packages.coreutils]
 
-[packages.drivers]
-
 [packages.extrautils]
 
 [packages.findutils]
@@ -25,6 +23,8 @@ filesystem_size = 256
 [packages.ion]
 
 [packages.kernel]
+
+[packages.kibi]
 
 [packages.libgcc]
 
@@ -38,8 +38,6 @@ filesystem_size = 256
 
 [packages.relibc]
 
-[packages.smith]
-
 [packages.userutils]
 
 [packages.uutils]
@@ -48,16 +46,17 @@ filesystem_size = 256
 path = "/usr/lib/init.d/00_base"
 data = """
 # clear and recreate tmpdir with 0o1777 permission
-rm -r /tmp
+rm -rf /tmp
 mkdir -m a=rwxt /tmp
 
 ipcd
 ptyd
-sudo --daemon
+nowait sudo --daemon
 """
 symlink = false
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/usr/lib/init.d/00_drivers"
@@ -67,6 +66,7 @@ pcid-spawner /etc/pcid.d/
 symlink = false
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/etc/hostname"
@@ -74,6 +74,7 @@ data = "redox"
 symlink = false
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/usr/lib/os-release"
@@ -91,6 +92,7 @@ SUPPORT_URL="https://redox-os.org/community/"
 symlink = false
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/etc/os-release"
@@ -98,6 +100,7 @@ data = "../usr/lib/os-release"
 symlink = true
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/etc/pkg.d/50_redox"
@@ -105,6 +108,7 @@ data = "https://static.redox-os.org/pkg"
 symlink = false
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/usr"
@@ -113,6 +117,7 @@ symlink = false
 directory = true
 mode = 493
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/usr/bin"
@@ -121,6 +126,7 @@ symlink = false
 directory = true
 mode = 493
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/bin"
@@ -128,6 +134,7 @@ data = "usr/bin"
 symlink = true
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/usr/include"
@@ -136,6 +143,7 @@ symlink = false
 directory = true
 mode = 493
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/include"
@@ -143,6 +151,7 @@ data = "usr/include"
 symlink = true
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/usr/lib"
@@ -151,6 +160,7 @@ symlink = false
 directory = true
 mode = 493
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/lib"
@@ -158,6 +168,7 @@ data = "usr/lib"
 symlink = true
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/usr/libexec"
@@ -166,6 +177,7 @@ symlink = false
 directory = true
 mode = 493
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/usr/share"
@@ -174,6 +186,7 @@ symlink = false
 directory = true
 mode = 493
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/share"
@@ -181,6 +194,7 @@ data = "usr/share"
 symlink = true
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/usr/share/fonts"
@@ -188,6 +202,7 @@ data = "../../ui/fonts"
 symlink = true
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/var"
@@ -196,6 +211,7 @@ symlink = false
 directory = true
 mode = 493
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/var/cache"
@@ -204,6 +220,7 @@ symlink = false
 directory = true
 mode = 493
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/var/lib"
@@ -212,6 +229,7 @@ symlink = false
 directory = true
 mode = 493
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/var/lock"
@@ -220,6 +238,7 @@ symlink = false
 directory = true
 mode = 1023
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/var/log"
@@ -228,6 +247,16 @@ symlink = false
 directory = true
 mode = 493
 recursive_chown = false
+postinstall = false
+
+[[files]]
+path = "/var/run"
+data = ""
+symlink = false
+directory = true
+mode = 493
+recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/var/tmp"
@@ -236,6 +265,7 @@ symlink = false
 directory = true
 mode = 1023
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/dev/null"
@@ -243,6 +273,7 @@ data = "/scheme/null"
 symlink = true
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/dev/random"
@@ -250,6 +281,7 @@ data = "/scheme/rand"
 symlink = true
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/dev/urandom"
@@ -257,6 +289,7 @@ data = "/scheme/rand"
 symlink = true
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/dev/zero"
@@ -264,6 +297,7 @@ data = "/scheme/zero"
 symlink = true
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/dev/tty"
@@ -271,6 +305,7 @@ data = "libc:tty"
 symlink = true
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/dev/stdin"
@@ -278,6 +313,7 @@ data = "libc:stdin"
 symlink = true
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/dev/stdout"
@@ -285,6 +321,7 @@ data = "libc:stdout"
 symlink = true
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/dev/stderr"
@@ -292,26 +329,28 @@ data = "libc:stderr"
 symlink = true
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/usr/lib/init.d/10_net"
 data = """
 smolnetd
-dnsd
-dhcpd -b
+nowait dhcpd
 """
 symlink = false
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/etc/net/dns"
 data = """
-208.67.222.222
+9.9.9.9
 """
 symlink = false
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/etc/net/ip"
@@ -321,6 +360,7 @@ data = """
 symlink = false
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/etc/net/ip_router"
@@ -330,6 +370,7 @@ data = """
 symlink = false
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/etc/net/ip_subnet"
@@ -339,17 +380,19 @@ data = """
 symlink = false
 directory = false
 recursive_chown = false
+postinstall = false
 
 [[files]]
 path = "/usr/lib/init.d/30_console"
 data = """
 inputd -A 2
-getty 2
-getty /scheme/debug -J
+nowait getty 2
+nowait getty /scheme/debug -J
 """
 symlink = false
 directory = false
 recursive_chown = false
+postinstall = false
 
 [users.root]
 password = "password"
