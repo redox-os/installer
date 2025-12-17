@@ -951,6 +951,137 @@ fn copy_directory_to_fs<D: Disk>(
     Ok(())
 }
 
+/// Copy a list of files from a source root to RedoxFS using the transaction API.
+/// Used by the TUI installer to copy files from a live system.
+pub fn copy_files_to_redoxfs<D: Disk>(
+    fs: &mut FileSystem<D>,
+    root_path: &Path,
+    files: &[String],
+    ctime: u64,
+    ctime_nsec: u32,
+) -> Result<()> {
+    use crate::redoxfs_ops;
+    use std::os::unix::fs::PermissionsExt;
+
+    for (i, name) in files.iter().enumerate() {
+        let src = root_path.join(name);
+        let dest_path = Path::new(name);
+
+        // Skip if source doesn't exist
+        if !src.exists() && !src.is_symlink() {
+            eprintln!("Warning: skipping missing file {}", src.display());
+            continue;
+        }
+
+        let metadata = match src.symlink_metadata() {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("Warning: cannot read metadata for {}: {}", src.display(), e);
+                continue;
+            }
+        };
+
+        eprintln!("copy {} [{}/{}]", name, i + 1, files.len());
+
+        if metadata.file_type().is_symlink() {
+            let target = std::fs::read_link(&src)?;
+            let target_str = target.to_str().ok_or_else(|| {
+                anyhow::anyhow!("Symlink target is not valid UTF-8: {:?}", target)
+            })?;
+            fs.tx(|tx| {
+                let parent_ptr = redoxfs_ops::ensure_parent_dirs(tx, dest_path, ctime, ctime_nsec)
+                    .map_err(|_| syscall::Error::new(syscall::EIO))?;
+                let file_name = dest_path.file_name().unwrap().to_str().unwrap();
+                redoxfs_ops::create_symlink(tx, parent_ptr, file_name, target_str, ctime, ctime_nsec)
+                    .map_err(|_| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        } else if metadata.file_type().is_dir() {
+            fs.tx(|tx| {
+                redoxfs_ops::create_at_path(
+                    tx,
+                    dest_path,
+                    true,
+                    false,
+                    &[],
+                    (metadata.permissions().mode() & 0o7777) as u16,
+                    0,
+                    0,
+                    ctime,
+                    ctime_nsec,
+                ).map_err(|_| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        } else {
+            let content = std::fs::read(&src)?;
+            fs.tx(|tx| {
+                redoxfs_ops::create_at_path(
+                    tx,
+                    dest_path,
+                    false,
+                    false,
+                    &content,
+                    (metadata.permissions().mode() & 0o7777) as u16,
+                    0,
+                    0,
+                    ctime,
+                    ctime_nsec,
+                ).map_err(|_| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Install from a live Redox system to RedoxFS using the transaction API.
+/// This is used by the TUI installer when fast install is not available.
+pub fn install_live_to_redoxfs<D: Disk>(
+    mut fs: FileSystem<D>,
+    root_path: &Path,
+    config: Config,
+    files: Vec<String>,
+) -> Result<()> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let ctime = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let ctime_secs = ctime.as_secs();
+    let ctime_nsec = ctime.subsec_nanos();
+
+    // Phase 1: Configure system (create config files, users, groups)
+    eprintln!("configuring system");
+
+    // Create pre-install files
+    for file in &config.files {
+        if !file.postinstall {
+            fs.tx(|tx| {
+                file.create_in_tx(tx, ctime_secs, ctime_nsec)
+                    .map_err(|_| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        }
+    }
+
+    // Create post-install files
+    for file in &config.files {
+        if file.postinstall {
+            fs.tx(|tx| {
+                file.create_in_tx(tx, ctime_secs, ctime_nsec)
+                    .map_err(|_| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        }
+    }
+
+    // Create users and groups
+    create_users_groups_to_tx(&mut fs, &config, ctime_secs, ctime_nsec)?;
+
+    // Phase 2: Copy files from live system
+    copy_files_to_redoxfs(&mut fs, root_path, &files, ctime_secs, ctime_nsec)?;
+
+    // Phase 3: Sync to disk
+    eprintln!("finished installing, syncing filesystem");
+    fs.tx(|tx| tx.sync(true)).map_err(syscall_error)?;
+
+    Ok(())
+}
+
 /// Create users and groups in RedoxFS using the transaction API
 fn create_users_groups_to_tx<D: Disk>(
     fs: &mut FileSystem<D>,
