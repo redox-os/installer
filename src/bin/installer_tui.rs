@@ -1,13 +1,12 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::Result;
 use pkgar::{ext::EntryExt, PackageHead};
 use pkgar_core::PackageSrc;
 use pkgar_keys::PublicKeyFile;
-use redox_installer::{try_fast_install, with_redoxfs_mount, with_whole_disk, Config, DiskOption};
+use redox_installer::{install_live_to_redoxfs, try_fast_install, with_whole_disk, Config, DiskOption};
 use std::{
     ffi::OsStr,
     fs,
-    io::{self, Read, Write},
-    os::unix::fs::{symlink, MetadataExt, OpenOptionsExt},
+    io,
     path::{Path, PathBuf},
     process,
 };
@@ -87,90 +86,6 @@ fn format_size(size: u64) -> String {
     } else {
         format!("{} B", size)
     }
-}
-
-fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<()> {
-    if let Some(parent) = dest.parent() {
-        // Parent may be a symlink
-        if !parent.is_symlink() {
-            match fs::create_dir_all(&parent) {
-                Ok(()) => (),
-                Err(err) => {
-                    bail!("failed to create directory {}: {}", parent.display(), err);
-                }
-            }
-        }
-    }
-
-    let metadata = match fs::symlink_metadata(&src) {
-        Ok(ok) => ok,
-        Err(err) => {
-            bail!("failed to read metadata of {}: {}", src.display(), err);
-        }
-    };
-
-    if metadata.file_type().is_symlink() {
-        let real_src = match fs::read_link(&src) {
-            Ok(ok) => ok,
-            Err(err) => {
-                bail!("failed to read link {}: {}", src.display(), err);
-            }
-        };
-
-        match symlink(&real_src, &dest) {
-            Ok(()) => (),
-            Err(err) => {
-                bail!(
-                    "failed to copy link {} ({}) to {}: {}",
-                    src.display(),
-                    real_src.display(),
-                    dest.display(),
-                    err
-                );
-            }
-        }
-    } else {
-        let mut src_file = match fs::File::open(&src) {
-            Ok(ok) => ok,
-            Err(err) => {
-                bail!("failed to open file {}: {}", src.display(), err);
-            }
-        };
-
-        let mut dest_file = match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(metadata.mode())
-            .open(&dest)
-        {
-            Ok(ok) => ok,
-            Err(err) => {
-                bail!("failed to create file {}: {}", dest.display(), err);
-            }
-        };
-
-        loop {
-            let count = match src_file.read(buf) {
-                Ok(ok) => ok,
-                Err(err) => {
-                    bail!("failed to read file {}: {}", src.display(), err);
-                }
-            };
-
-            if count == 0 {
-                break;
-            }
-
-            match dest_file.write_all(&buf[..count]) {
-                Ok(()) => (),
-                Err(err) => {
-                    bail!("failed to write file {}: {}", dest.display(), err);
-                }
-            }
-        }
-    }
-
-    Ok(())
 }
 
 fn package_files(
@@ -337,42 +252,21 @@ fn main() {
             return Ok(());
         }
 
-        // Slow install method via file copy
-        with_redoxfs_mount(fs, None, |mount_path| {
-            let mut config: Config = Config::from_file(&root_path.join("filesystem.toml"))?;
+        // Slow install method via transaction API
+        let mut config: Config = Config::from_file(&root_path.join("filesystem.toml"))?;
 
-            // Copy filesystem.toml, which is not packaged
-            let mut files = vec!["filesystem.toml".to_string()];
+        // Copy filesystem.toml, which is not packaged
+        let mut files = vec!["filesystem.toml".to_string()];
 
-            // Copy files from locally installed packages
-            package_files(&root_path, &mut config, &mut files)
-                // TODO: implement Error trait
-                .map_err(|err| anyhow!("failed to read package files: {err}"))?;
+        // Copy files from locally installed packages
+        package_files(&root_path, &mut config, &mut files)?;
 
-            // Perform config install (after packages have been converted to files)
-            eprintln!("configuring system");
-            let cookbook: Option<&'static str> = None;
-            redox_installer::install_dir(config, mount_path, cookbook)
-                .map_err(|err| io::Error::other(err))?;
+        // Sort and remove duplicates
+        files.sort();
+        files.dedup();
 
-            // Sort and remove duplicates
-            files.sort();
-            files.dedup();
-
-            // Install files
-            let mut buf = vec![0; 4 * MIB as usize];
-            for (i, name) in files.iter().enumerate() {
-                eprintln!("copy {} [{}/{}]", name, i, files.len());
-
-                let src = root_path.join(name);
-                let dest = mount_path.join(name);
-                copy_file(&src, &dest, &mut buf)?;
-            }
-
-            eprintln!("finished installing, unmounting filesystem");
-
-            Ok(())
-        })
+        // Install using transaction API (config files, users, and copy files)
+        install_live_to_redoxfs(fs, root_path, config, files)
     });
 
     match res {

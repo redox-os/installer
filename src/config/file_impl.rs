@@ -8,6 +8,11 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::Path;
 
+#[cfg(feature = "installer")]
+use redoxfs::{Disk, Node, Transaction, TreePtr};
+#[cfg(feature = "installer")]
+use crate::redoxfs_ops;
+
 fn chown<P: AsRef<Path>>(path: P, uid: uid_t, gid: gid_t, recursive: bool) -> Result<()> {
     let path = path.as_ref();
 
@@ -68,5 +73,49 @@ impl crate::FileConfig {
 
         // chown
         chown(path, uid, gid, self.recursive_chown)
+    }
+
+    /// Create file/directory/symlink using RedoxFS Transaction API
+    #[cfg(feature = "installer")]
+    pub fn create_in_tx<D: Disk>(
+        &self,
+        tx: &mut Transaction<D>,
+        ctime: u64,
+        ctime_nsec: u32,
+    ) -> Result<TreePtr<Node>> {
+        let path = Path::new(self.path.trim_start_matches('/'));
+        let mode = self
+            .mode
+            .unwrap_or_else(|| if self.directory { 0o0755 } else { 0o0644 }) as u16;
+        let uid = self.uid.unwrap_or(0);
+        let gid = self.gid.unwrap_or(0);
+
+        println!(
+            "Create {} {} (mode={:o}, uid={}, gid={})",
+            if self.directory {
+                "directory"
+            } else if self.symlink {
+                "symlink"
+            } else {
+                "file"
+            },
+            path.display(),
+            mode,
+            uid,
+            gid
+        );
+
+        redoxfs_ops::create_at_path(
+            tx,
+            path,
+            self.directory,
+            self.symlink,
+            self.data.as_bytes(),
+            mode,
+            uid,
+            gid,
+            ctime,
+            ctime_nsec,
+        )
     }
 }
