@@ -837,6 +837,14 @@ fn install_remote_packages_to_tx<D: Disk>(
     }
     std::fs::create_dir_all(&temp_dir)?;
 
+    // Create pkg.d config for the pkg library to know where to download from
+    FileConfig {
+        path: "/etc/pkg.d/50_redox".to_string(),
+        data: "https://static.redox-os.org/pkg".to_string(),
+        ..Default::default()
+    }
+    .create(&temp_dir)?;
+
     // Create pkg/packages directory for head files
     let dest_pkg = temp_dir.join("pkg/packages");
     std::fs::create_dir_all(&dest_pkg)?;

@@ -9,6 +9,7 @@ use std::path::Path;
 
 /// Navigate to the parent directory of the given path, creating intermediate directories as needed.
 /// Returns the TreePtr of the parent directory.
+/// If a path component is a symlink, it will be followed (symlink must point to a directory).
 pub fn ensure_parent_dirs<D: Disk>(
     tx: &mut Transaction<D>,
     path: &Path,
@@ -35,7 +36,84 @@ pub fn ensure_parent_dirs<D: Disk>(
         // Try to find existing directory
         match tx.find_node(current_ptr, name) {
             Ok(tree_data) => {
-                current_ptr = tree_data.ptr();
+                let node = tree_data.data();
+                // Check if it's a symlink and follow it
+                if node.mode() & Node::MODE_TYPE == Node::MODE_SYMLINK {
+                    // Read symlink target
+                    let node_ptr = tree_data.ptr();
+                    let size = node.size();
+                    let mut target_buf = vec![0u8; size as usize];
+                    let _bytes_read = tx.read_node(node_ptr, 0, &mut target_buf, ctime, ctime_nsec)
+                        .map_err(|e| anyhow::anyhow!("Failed to read symlink '{}': {}", name, e))?;
+                    let target = std::str::from_utf8(&target_buf)
+                        .map_err(|e| anyhow::anyhow!("Symlink '{}' target is not valid UTF-8: {}", name, e))?;
+
+                    // Resolve symlink target relative to current directory
+                    // For absolute symlinks, start from root
+                    // For relative symlinks, navigate from current position
+                    if target.starts_with('/') {
+                        // Absolute symlink - resolve from root
+                        current_ptr = TreePtr::root();
+                        for part in target.trim_start_matches('/').split('/') {
+                            if part.is_empty() || part == "." {
+                                continue;
+                            }
+                            if part == ".." {
+                                // Go up - not supported for now, bail
+                                bail!("Symlink with .. not supported: {}", target);
+                            }
+                            match tx.find_node(current_ptr, part) {
+                                Ok(part_data) => {
+                                    current_ptr = part_data.ptr();
+                                }
+                                Err(err) if err.errno == syscall::ENOENT => {
+                                    // Create the missing directory
+                                    let mode = Node::MODE_DIR | 0o755;
+                                    let mut new_tree = tx.create_node(current_ptr, part, mode, ctime, ctime_nsec)
+                                        .map_err(|e| anyhow::anyhow!("Failed to create directory '{}': {}", part, e))?;
+                                    let new_ptr = new_tree.ptr();
+                                    new_tree.data_mut().set_uid(0);
+                                    new_tree.data_mut().set_gid(0);
+                                    tx.sync_tree(new_tree)?;
+                                    current_ptr = new_ptr;
+                                }
+                                Err(err) => {
+                                    bail!("Failed to find node '{}' in symlink target: {}", part, err);
+                                }
+                            }
+                        }
+                    } else {
+                        // Relative symlink - resolve from current directory
+                        for part in target.split('/') {
+                            if part.is_empty() || part == "." {
+                                continue;
+                            }
+                            if part == ".." {
+                                bail!("Symlink with .. not supported: {}", target);
+                            }
+                            match tx.find_node(current_ptr, part) {
+                                Ok(part_data) => {
+                                    current_ptr = part_data.ptr();
+                                }
+                                Err(err) if err.errno == syscall::ENOENT => {
+                                    let mode = Node::MODE_DIR | 0o755;
+                                    let mut new_tree = tx.create_node(current_ptr, part, mode, ctime, ctime_nsec)
+                                        .map_err(|e| anyhow::anyhow!("Failed to create directory '{}': {}", part, e))?;
+                                    let new_ptr = new_tree.ptr();
+                                    new_tree.data_mut().set_uid(0);
+                                    new_tree.data_mut().set_gid(0);
+                                    tx.sync_tree(new_tree)?;
+                                    current_ptr = new_ptr;
+                                }
+                                Err(err) => {
+                                    bail!("Failed to find node '{}' in symlink target: {}", part, err);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    current_ptr = tree_data.ptr();
+                }
             }
             Err(err) if err.errno == syscall::ENOENT => {
                 // Create directory with default permissions 0o755
@@ -223,15 +301,54 @@ pub fn create_at_path<D: Disk>(
         .ok_or_else(|| anyhow::anyhow!("Invalid UTF-8 in filename"))?;
 
     if is_directory {
-        create_directory(tx, parent_ptr, name, mode, uid, gid, ctime, ctime_nsec)
+        // Check if directory already exists (may have been created as parent of earlier files)
+        match tx.find_node(parent_ptr, name) {
+            Ok(tree_data) => {
+                // Directory already exists, just return its pointer
+                // TODO: optionally update mode/uid/gid if needed
+                Ok(tree_data.ptr())
+            }
+            Err(err) if err.errno == syscall::ENOENT => {
+                // Directory doesn't exist, create it
+                create_directory(tx, parent_ptr, name, mode, uid, gid, ctime, ctime_nsec)
+            }
+            Err(err) => {
+                bail!("Failed to check if directory '{}' exists: {}", name, err);
+            }
+        }
     } else if is_symlink {
-        let target = std::str::from_utf8(content)
-            .map_err(|e| anyhow::anyhow!("Symlink target is not valid UTF-8: {}", e))?;
-        create_symlink(tx, parent_ptr, name, target, ctime, ctime_nsec)
+        // Check if symlink already exists
+        match tx.find_node(parent_ptr, name) {
+            Ok(tree_data) => {
+                // Symlink already exists, skip
+                Ok(tree_data.ptr())
+            }
+            Err(err) if err.errno == syscall::ENOENT => {
+                let target = std::str::from_utf8(content)
+                    .map_err(|e| anyhow::anyhow!("Symlink target is not valid UTF-8: {}", e))?;
+                create_symlink(tx, parent_ptr, name, target, ctime, ctime_nsec)
+            }
+            Err(err) => {
+                bail!("Failed to check if symlink '{}' exists: {}", name, err);
+            }
+        }
     } else {
-        create_file(
-            tx, parent_ptr, name, content, mode, uid, gid, ctime, ctime_nsec,
-        )
+        // Check if file already exists
+        match tx.find_node(parent_ptr, name) {
+            Ok(tree_data) => {
+                // File already exists, skip
+                // TODO: optionally overwrite or update content
+                Ok(tree_data.ptr())
+            }
+            Err(err) if err.errno == syscall::ENOENT => {
+                create_file(
+                    tx, parent_ptr, name, content, mode, uid, gid, ctime, ctime_nsec,
+                )
+            }
+            Err(err) => {
+                bail!("Failed to check if file '{}' exists: {}", name, err);
+            }
+        }
     }
 }
 

@@ -35,7 +35,7 @@ pkgar-keys = { version = "0.1.19", optional = true }
 rand = { version = "0.9", optional = true }
 redox-pkg = { version = "0.2.9", features = ["indicatif"], optional = true }
 redox_syscall = { version = "0.5.2", optional = true }
-redoxfs = { version = "0.8", optional = true }
+redoxfs = { version = "0.8", optional = true, default-features = false, features = ["std", "log"] }
 rust-argon2 = { version = "0.8.2", optional = true }
 serde = "1"
 serde_derive = "1.0"
