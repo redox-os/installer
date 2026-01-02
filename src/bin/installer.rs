@@ -19,8 +19,7 @@ fn main() {
         .add_flag(&["filesystem-size"])
         .add_flag(&["r", "repo-binary"])
         .add_flag(&["l", "list-packages"])
-        .add_flag(&["live"])
-        .add_flag(&["no-mount"]);
+        .add_flag(&["live"]);
     parser.parse(env::args());
 
     // Use pre-built binaries for packages as the default.
@@ -133,9 +132,6 @@ fn main() {
         }
         if parser.found("live") {
             config.general.live_disk = Some(true);
-        }
-        if parser.found("no-mount") {
-            config.general.no_mount = Some(true);
         }
         let write_bootloader = parser.get_opt("write-bootloader");
         if write_bootloader.is_some() {

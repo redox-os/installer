@@ -19,9 +19,6 @@ pub struct GeneralConfig {
     pub live_disk: Option<bool>,
     /// If set, write bootloader disk into this path
     pub write_bootloader: Option<String>,
-    /// Use AR to write files instead of FUSE-based mount
-    /// (bypasses FUSE, but slower and requires namespaced context such as "podman unshare")
-    pub no_mount: Option<bool>,
 }
 
 impl GeneralConfig {
@@ -42,6 +39,5 @@ impl GeneralConfig {
         if let Some(write_bootloader) = other.write_bootloader {
             self.write_bootloader = Some(write_bootloader);
         }
-        self.no_mount = other.no_mount.or(self.no_mount);
     }
 }

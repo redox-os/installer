@@ -3,7 +3,7 @@ use anyhow::{anyhow, Context};
 use anyhow::{bail, Result};
 use pkg::Library;
 use rand::{rngs::OsRng, TryRngCore};
-use redoxfs::{unmount_path, Disk, DiskIo, FileSystem, BLOCK_SIZE};
+use redoxfs::{Disk, DiskIo, FileSystem, BLOCK_SIZE};
 use termion::input::TermRead;
 
 use crate::config::file::FileConfig;
@@ -19,8 +19,6 @@ use std::{
     path::{Path, PathBuf},
     process,
     rc::Rc,
-    sync::mpsc::channel,
-    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -356,134 +354,6 @@ where
     callback(fs)
 }
 
-fn decide_mount_path(mount_path: Option<&Path>) -> PathBuf {
-    let mount_path = mount_path.map(|p| p.to_path_buf()).unwrap_or_else(|| {
-        PathBuf::from(if cfg!(target_os = "redox") {
-            format!("file.redox_installer_{}", process::id())
-        } else {
-            format!("/tmp/redox_installer_{}", process::id())
-        })
-    });
-    mount_path
-}
-
-pub fn with_redoxfs_mount<D, T, F>(
-    fs: FileSystem<D>,
-    mount_path: Option<&Path>,
-    callback: F,
-) -> Result<T>
-where
-    D: Disk + Send + 'static,
-    F: FnOnce(&Path) -> Result<T>,
-{
-    let mount_path = decide_mount_path(mount_path);
-
-    if cfg!(not(target_os = "redox")) && !mount_path.exists() {
-        fs::create_dir(&mount_path)?;
-    }
-
-    let (tx, rx) = channel();
-    let join_handle = {
-        let mount_path = mount_path.clone();
-        thread::spawn(move || {
-            let res = redoxfs::mount(fs, &mount_path, |real_path| {
-                tx.send(Ok(real_path.to_owned())).unwrap();
-            });
-            match res {
-                Ok(()) => (),
-                Err(err) => {
-                    tx.send(Err(err)).unwrap();
-                }
-            };
-        })
-    };
-
-    let res = match rx.recv() {
-        Ok(ok) => match ok {
-            Ok(real_path) => callback(&real_path),
-            Err(err) => return Err(err.into()),
-        },
-        Err(_) => {
-            return Err(io::Error::new(
-                io::ErrorKind::NotConnected,
-                "redoxfs thread did not send a result",
-            )
-            .into())
-        }
-    };
-
-    unmount_path(&mount_path.as_os_str().to_str().unwrap())?;
-
-    join_handle.join().unwrap();
-
-    if cfg!(not(target_os = "redox")) {
-        fs::remove_dir_all(&mount_path)?;
-    }
-
-    res
-}
-
-pub fn with_redoxfs_ar<D, T, F>(
-    mut fs: FileSystem<D>,
-    mount_path: Option<&Path>,
-    callback: F,
-) -> Result<T>
-where
-    D: Disk + Send + 'static,
-    F: FnOnce(&Path) -> Result<T>,
-{
-    let mount_path = decide_mount_path(mount_path);
-
-    let res = callback(Path::new(&mount_path));
-
-    if res.is_ok() {
-        let _end_block = fs
-            .tx(|tx| {
-                // Archive_at root node
-                redoxfs::archive_at(tx, Path::new(&mount_path), redoxfs::TreePtr::root())
-                    .map_err(|err| syscall::Error::new(err.raw_os_error().unwrap()))?;
-
-                // Squash alloc log
-                tx.sync(true)?;
-
-                let end_block = tx.header.size() / BLOCK_SIZE;
-                /* TODO: Cut off any free blocks at the end of the filesystem
-                let mut end_changed = true;
-                while end_changed {
-                    end_changed = false;
-
-                    let allocator = fs.allocator();
-                    let levels = allocator.levels();
-                    for level in 0..levels.len() {
-                        let level_size = 1 << level;
-                        for &block in levels[level].iter() {
-                            if block < end_block && block + level_size >= end_block {
-                                end_block = block;
-                                end_changed = true;
-                            }
-                        }
-                    }
-                }
-                */
-
-                // Update header
-                tx.header.size = (end_block * BLOCK_SIZE).into();
-                tx.header_changed = true;
-                tx.sync(false)?;
-
-                Ok(end_block)
-            })
-            .map_err(syscall_error)?;
-
-        // let size = (fs.block + end_block) * BLOCK_SIZE;
-        // fs.disk.file.set_len(size)?;
-    }
-
-    fs::remove_dir_all(&mount_path)?;
-
-    res
-}
-
 pub fn fetch_bootloaders(
     config: &Config,
     cookbook: Option<&str>,
@@ -816,6 +686,560 @@ pub fn try_fast_install<D: redoxfs::Disk, F: FnMut(u64, u64)>(
     Ok(true)
 }
 
+/// Install to RedoxFS using the transaction API directly, without FUSE.
+pub fn install_to_redoxfs<D: Disk + Send + 'static>(
+    mut fs: FileSystem<D>,
+    config: Config,
+    cookbook: Option<&str>,
+) -> Result<()> {
+    use crate::redoxfs_ops;
+    use std::collections::HashSet;
+
+    let ctime = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let ctime_secs = ctime.as_secs();
+    let ctime_nsec = ctime.subsec_nanos();
+    let target = get_target();
+
+    // Phase 1: Create pre-install files
+    println!("Creating pre-install files...");
+    for file in &config.files {
+        if !file.postinstall {
+            fs.tx(|tx| {
+                file.create_in_tx(tx, ctime_secs, ctime_nsec)
+                    .map_err(|e| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        }
+    }
+
+    // Phase 2: Install packages
+    println!("Installing packages...");
+    let packages: Vec<&String> = config
+        .packages
+        .iter()
+        .filter_map(|(packagename, package)| match package {
+            PackageConfig::Build(rule) if rule == "ignore" => None,
+            _ => Some(packagename),
+        })
+        .collect();
+
+    if let Some(cookbook) = cookbook {
+        // Local cookbook installation using transaction API
+        let mut installed: HashSet<String> = HashSet::new();
+        for packagename in &packages {
+            install_local_pkgar_to_tx(&mut fs, cookbook, &target, packagename, &mut installed, ctime_secs, ctime_nsec)?;
+        }
+    } else {
+        // Remote package installation - download to temp, then extract
+        install_remote_packages_to_tx(&mut fs, &packages, &target, ctime_secs, ctime_nsec)?;
+    }
+
+    // Phase 3: Create post-install files
+    println!("Creating post-install files...");
+    for file in &config.files {
+        if file.postinstall {
+            fs.tx(|tx| {
+                file.create_in_tx(tx, ctime_secs, ctime_nsec)
+                    .map_err(|e| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        }
+    }
+
+    // Phase 4: Create users and groups
+    println!("Creating users and groups...");
+    create_users_groups_to_tx(&mut fs, &config, ctime_secs, ctime_nsec)?;
+
+    // Phase 5: Sync to disk
+    println!("Syncing to disk...");
+    fs.tx(|tx| tx.sync(true)).map_err(syscall_error)?;
+
+    Ok(())
+}
+
+/// Install a single local package and its dependencies using the transaction API
+fn install_local_pkgar_to_tx<D: Disk>(
+    fs: &mut FileSystem<D>,
+    cookbook: &str,
+    target: &str,
+    packagename: &str,
+    installed: &mut std::collections::HashSet<String>,
+    ctime: u64,
+    ctime_nsec: u32,
+) -> Result<()> {
+    use crate::redoxfs_ops;
+
+    if installed.contains(packagename) {
+        return Ok(());
+    }
+    installed.insert(packagename.to_string());
+
+    let public_path = format!("{cookbook}/build/id_ed25519.pub.toml");
+    let pkgar_path = format!("{cookbook}/repo/{target}/{packagename}.pkgar");
+    let pkginfo_path = format!("{cookbook}/repo/{target}/{packagename}.toml");
+
+    let pkginfo = pkg::Package::from_toml(&std::fs::read_to_string(&pkginfo_path)?)?;
+
+    if !pkginfo.version.is_empty() {
+        println!("Installing package from local repo: {}", packagename);
+
+        // Open the package file
+        let pkey = pkgar_keys::PublicKeyFile::open(&public_path)?.pkey;
+        let mut package = pkgar::PackageFile::new(&pkgar_path, &pkey)?;
+
+        // Extract package using transaction API
+        fs.tx(|tx| {
+            redoxfs_ops::extract_pkgar_to_tx(tx, &mut package, ctime, ctime_nsec)
+                .map_err(|_| syscall::Error::new(syscall::EIO))
+        }).map_err(syscall_error)?;
+
+        // Create the head file to mark package as installed
+        let head_path = format!("pkg/packages/{packagename}.pkgar_head");
+        let head_content = format!("version = \"{}\"\n", pkginfo.version);
+        fs.tx(|tx| {
+            redoxfs_ops::create_at_path(
+                tx,
+                std::path::Path::new(&head_path),
+                false,
+                false,
+                head_content.as_bytes(),
+                0o644,
+                0,
+                0,
+                ctime,
+                ctime_nsec,
+            ).map_err(|_| syscall::Error::new(syscall::EIO))
+        }).map_err(syscall_error)?;
+    }
+
+    // Install dependencies recursively
+    for dep in pkginfo.depends.iter() {
+        install_local_pkgar_to_tx(fs, cookbook, target, dep.as_str(), installed, ctime, ctime_nsec)?;
+    }
+
+    Ok(())
+}
+
+/// Install remote packages using the transaction API
+/// Downloads packages to a temp directory, then extracts them
+fn install_remote_packages_to_tx<D: Disk>(
+    fs: &mut FileSystem<D>,
+    packages: &[&String],
+    target: &str,
+    ctime: u64,
+    ctime_nsec: u32,
+) -> Result<()> {
+    use crate::redoxfs_ops;
+    use std::os::unix::fs::PermissionsExt;
+
+    // Create a temporary directory for downloads
+    let temp_dir = PathBuf::from(format!("/tmp/redox_installer_pkg_{}", process::id()));
+    if temp_dir.exists() {
+        std::fs::remove_dir_all(&temp_dir)?;
+    }
+    std::fs::create_dir_all(&temp_dir)?;
+
+    // Create pkg.d config for the pkg library to know where to download from
+    FileConfig {
+        path: "/etc/pkg.d/50_redox".to_string(),
+        data: "https://static.redox-os.org/pkg".to_string(),
+        ..Default::default()
+    }
+    .create(&temp_dir)?;
+
+    // Create pkg/packages directory for head files
+    let dest_pkg = temp_dir.join("pkg/packages");
+    std::fs::create_dir_all(&dest_pkg)?;
+
+    // Use pkg::Library to download packages to temp directory
+    let callback = pkg::callback::IndicatifCallback::new();
+    let mut library = Library::new(&temp_dir, target, Rc::new(RefCell::new(callback)))?;
+
+    for packagename in packages {
+        println!("Installing package from remote: {}", packagename);
+        library.install(vec![pkg::PackageName::new(packagename.as_str())?])?;
+    }
+    library.apply()?;
+
+    // Now walk the temp directory and copy everything to redoxfs
+    copy_directory_to_fs(fs, &temp_dir, ctime, ctime_nsec)?;
+
+    // Clean up temp directory
+    std::fs::remove_dir_all(&temp_dir)?;
+
+    Ok(())
+}
+
+/// Recursively copy a directory tree into RedoxFS using the transaction API
+fn copy_directory_to_fs<D: Disk>(
+    fs: &mut FileSystem<D>,
+    source_dir: &Path,
+    ctime: u64,
+    ctime_nsec: u32,
+) -> Result<()> {
+    use crate::redoxfs_ops;
+    use std::os::unix::fs::PermissionsExt;
+
+    // Walk directory recursively
+    fn walk_dir(dir: &Path, base: &Path, entries: &mut Vec<(PathBuf, PathBuf)>) -> Result<()> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let relative = path.strip_prefix(base)?.to_path_buf();
+            entries.push((path.clone(), relative));
+            if path.is_dir() && !path.is_symlink() {
+                walk_dir(&path, base, entries)?;
+            }
+        }
+        Ok(())
+    }
+
+    let mut entries = Vec::new();
+    walk_dir(source_dir, source_dir, &mut entries)?;
+
+    for (source_path, relative_path) in entries {
+        let metadata = source_path.symlink_metadata()?;
+        let file_type = metadata.file_type();
+
+        if file_type.is_symlink() {
+            let target = std::fs::read_link(&source_path)?;
+            let target_str = target.to_str().ok_or_else(|| {
+                anyhow::anyhow!("Symlink target is not valid UTF-8: {:?}", target)
+            })?;
+            println!("Copying symlink {} -> {}", relative_path.display(), target_str);
+            fs.tx(|tx| {
+                let parent_ptr = redoxfs_ops::ensure_parent_dirs(tx, &relative_path, ctime, ctime_nsec)
+                    .map_err(|_| syscall::Error::new(syscall::EIO))?;
+                let name = relative_path.file_name().unwrap().to_str().unwrap();
+                redoxfs_ops::create_symlink(tx, parent_ptr, name, target_str, ctime, ctime_nsec)
+                    .map_err(|_| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        } else if file_type.is_dir() {
+            println!("Creating directory {}", relative_path.display());
+            fs.tx(|tx| {
+                redoxfs_ops::create_at_path(
+                    tx,
+                    &relative_path,
+                    true,
+                    false,
+                    &[],
+                    (metadata.permissions().mode() & 0o7777) as u16,
+                    0,
+                    0,
+                    ctime,
+                    ctime_nsec,
+                ).map_err(|_| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        } else if file_type.is_file() {
+            let content = std::fs::read(&source_path)?;
+            println!("Copying file {} ({} bytes)", relative_path.display(), content.len());
+            fs.tx(|tx| {
+                redoxfs_ops::create_at_path(
+                    tx,
+                    &relative_path,
+                    false,
+                    false,
+                    &content,
+                    (metadata.permissions().mode() & 0o7777) as u16,
+                    0,
+                    0,
+                    ctime,
+                    ctime_nsec,
+                ).map_err(|_| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Copy a list of files from a source root to RedoxFS using the transaction API.
+/// Used by the TUI installer to copy files from a live system.
+pub fn copy_files_to_redoxfs<D: Disk>(
+    fs: &mut FileSystem<D>,
+    root_path: &Path,
+    files: &[String],
+    ctime: u64,
+    ctime_nsec: u32,
+) -> Result<()> {
+    use crate::redoxfs_ops;
+    use std::os::unix::fs::PermissionsExt;
+
+    for (i, name) in files.iter().enumerate() {
+        let src = root_path.join(name);
+        let dest_path = Path::new(name);
+
+        // Skip if source doesn't exist
+        if !src.exists() && !src.is_symlink() {
+            eprintln!("Warning: skipping missing file {}", src.display());
+            continue;
+        }
+
+        let metadata = match src.symlink_metadata() {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("Warning: cannot read metadata for {}: {}", src.display(), e);
+                continue;
+            }
+        };
+
+        eprintln!("copy {} [{}/{}]", name, i + 1, files.len());
+
+        if metadata.file_type().is_symlink() {
+            let target = std::fs::read_link(&src)?;
+            let target_str = target.to_str().ok_or_else(|| {
+                anyhow::anyhow!("Symlink target is not valid UTF-8: {:?}", target)
+            })?;
+            fs.tx(|tx| {
+                let parent_ptr = redoxfs_ops::ensure_parent_dirs(tx, dest_path, ctime, ctime_nsec)
+                    .map_err(|_| syscall::Error::new(syscall::EIO))?;
+                let file_name = dest_path.file_name().unwrap().to_str().unwrap();
+                redoxfs_ops::create_symlink(tx, parent_ptr, file_name, target_str, ctime, ctime_nsec)
+                    .map_err(|_| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        } else if metadata.file_type().is_dir() {
+            fs.tx(|tx| {
+                redoxfs_ops::create_at_path(
+                    tx,
+                    dest_path,
+                    true,
+                    false,
+                    &[],
+                    (metadata.permissions().mode() & 0o7777) as u16,
+                    0,
+                    0,
+                    ctime,
+                    ctime_nsec,
+                ).map_err(|_| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        } else {
+            let content = std::fs::read(&src)?;
+            fs.tx(|tx| {
+                redoxfs_ops::create_at_path(
+                    tx,
+                    dest_path,
+                    false,
+                    false,
+                    &content,
+                    (metadata.permissions().mode() & 0o7777) as u16,
+                    0,
+                    0,
+                    ctime,
+                    ctime_nsec,
+                ).map_err(|_| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Install from a live Redox system to RedoxFS using the transaction API.
+/// This is used by the TUI installer when fast install is not available.
+pub fn install_live_to_redoxfs<D: Disk>(
+    mut fs: FileSystem<D>,
+    root_path: &Path,
+    config: Config,
+    files: Vec<String>,
+) -> Result<()> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let ctime = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let ctime_secs = ctime.as_secs();
+    let ctime_nsec = ctime.subsec_nanos();
+
+    // Phase 1: Configure system (create config files, users, groups)
+    eprintln!("configuring system");
+
+    // Create pre-install files
+    for file in &config.files {
+        if !file.postinstall {
+            fs.tx(|tx| {
+                file.create_in_tx(tx, ctime_secs, ctime_nsec)
+                    .map_err(|_| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        }
+    }
+
+    // Create post-install files
+    for file in &config.files {
+        if file.postinstall {
+            fs.tx(|tx| {
+                file.create_in_tx(tx, ctime_secs, ctime_nsec)
+                    .map_err(|_| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        }
+    }
+
+    // Create users and groups
+    create_users_groups_to_tx(&mut fs, &config, ctime_secs, ctime_nsec)?;
+
+    // Phase 2: Copy files from live system
+    copy_files_to_redoxfs(&mut fs, root_path, &files, ctime_secs, ctime_nsec)?;
+
+    // Phase 3: Sync to disk
+    eprintln!("finished installing, syncing filesystem");
+    fs.tx(|tx| tx.sync(true)).map_err(syscall_error)?;
+
+    Ok(())
+}
+
+/// Create users and groups in RedoxFS using the transaction API
+fn create_users_groups_to_tx<D: Disk>(
+    fs: &mut FileSystem<D>,
+    config: &Config,
+    ctime: u64,
+    ctime_nsec: u32,
+) -> Result<()> {
+    use crate::redoxfs_ops;
+
+    let mut passwd = String::new();
+    let mut shadow = String::new();
+    let mut next_uid = 1000u32;
+    let mut next_gid = 1000u32;
+    let mut groups = vec![];
+
+    for (username, user) in &config.users {
+        let password = user.password.clone().unwrap_or_default();
+        let uid = user.uid.unwrap_or(next_uid);
+        if uid >= next_uid {
+            next_uid = uid + 1;
+        }
+
+        let gid = user.gid.unwrap_or(next_gid);
+        if gid >= next_gid {
+            next_gid = gid + 1;
+        }
+
+        let name = user.name.clone().unwrap_or_else(|| username.clone());
+        let home = user.home.clone().unwrap_or_else(|| format!("/home/{}", username));
+        let shell = user.shell.clone().unwrap_or_else(|| "/bin/ion".to_string());
+
+        println!("Adding user {username}:");
+        println!("\tUID: {uid}");
+        println!("\tGID: {gid}");
+        println!("\tName: {name}");
+        println!("\tHome: {home}");
+        println!("\tShell: {shell}");
+
+        // Create home directory
+        let home_config = FileConfig::new_directory(home.clone());
+        fs.tx(|tx| {
+            home_config.create_in_tx(tx, ctime, ctime_nsec)
+                .map_err(|_| syscall::Error::new(syscall::EIO))
+        }).map_err(syscall_error)?;
+
+        if uid >= 1000 {
+            // Create XDG user dirs
+            for xdg_folder in &[
+                "Desktop", "Documents", "Downloads", "Music", "Pictures",
+                "Public", "Templates", "Videos", ".config", ".local",
+                ".local/share", ".local/share/Trash", ".local/share/Trash/info",
+            ] {
+                let xdg_config = FileConfig::new_directory(format!("{}/{}", home, xdg_folder));
+                fs.tx(|tx| {
+                    xdg_config.create_in_tx(tx, ctime, ctime_nsec)
+                        .map_err(|_| syscall::Error::new(syscall::EIO))
+                }).map_err(syscall_error)?;
+            }
+
+            // Create user-dirs.dirs
+            let user_dirs_config = FileConfig::new_file(
+                format!("{}/.config/user-dirs.dirs", home),
+                r#"# Produced by redox installer
+XDG_DESKTOP_DIR="$HOME/Desktop"
+XDG_DOCUMENTS_DIR="$HOME/Documents"
+XDG_DOWNLOAD_DIR="$HOME/Downloads"
+XDG_MUSIC_DIR="$HOME/Music"
+XDG_PICTURES_DIR="$HOME/Pictures"
+XDG_PUBLICSHARE_DIR="$HOME/Public"
+XDG_TEMPLATES_DIR="$HOME/Templates"
+XDG_VIDEOS_DIR="$HOME/Videos"
+"#.to_string(),
+            );
+            fs.tx(|tx| {
+                user_dirs_config.create_in_tx(tx, ctime, ctime_nsec)
+                    .map_err(|_| syscall::Error::new(syscall::EIO))
+            }).map_err(syscall_error)?;
+        }
+
+        let password_hash = hash_password(&password)?;
+        passwd.push_str(&format!("{username};{uid};{gid};{name};{home};{shell}\n"));
+        shadow.push_str(&format!("{username};{password_hash}\n"));
+        groups.push((username.clone(), gid, vec![username.clone()]));
+    }
+
+    for (group, group_config) in &config.groups {
+        let gid = group_config.gid.unwrap_or(next_gid);
+        if gid >= next_gid {
+            next_gid = gid + 1;
+        }
+        groups.push((group.clone(), gid, group_config.members.clone()));
+    }
+
+    // Create /etc/passwd
+    if !passwd.is_empty() {
+        fs.tx(|tx| {
+            redoxfs_ops::create_at_path(
+                tx,
+                std::path::Path::new("etc/passwd"),
+                false,
+                false,
+                passwd.as_bytes(),
+                0o644,
+                0,
+                0,
+                ctime,
+                ctime_nsec,
+            ).map_err(|_| syscall::Error::new(syscall::EIO))
+        }).map_err(syscall_error)?;
+    }
+
+    // Create /etc/shadow
+    if !shadow.is_empty() {
+        fs.tx(|tx| {
+            redoxfs_ops::create_at_path(
+                tx,
+                std::path::Path::new("etc/shadow"),
+                false,
+                false,
+                shadow.as_bytes(),
+                0o600,
+                0,
+                0,
+                ctime,
+                ctime_nsec,
+            ).map_err(|_| syscall::Error::new(syscall::EIO))
+        }).map_err(syscall_error)?;
+    }
+
+    // Create /etc/group
+    if !groups.is_empty() {
+        let mut groups_data = String::new();
+        for (name, gid, members) in groups {
+            use std::fmt::Write;
+            writeln!(groups_data, "{name};x;{gid};{}", members.join(","))?;
+            println!("Adding group {name}:");
+            println!("\tGID: {gid}");
+            println!("\tMembers: {}", members.join(", "));
+        }
+        fs.tx(|tx| {
+            redoxfs_ops::create_at_path(
+                tx,
+                std::path::Path::new("etc/group"),
+                false,
+                false,
+                groups_data.as_bytes(),
+                0o600,
+                0,
+                0,
+                ctime,
+                ctime_nsec,
+            ).map_err(|_| syscall::Error::new(syscall::EIO))
+        }).map_err(syscall_error)?;
+    }
+
+    Ok(())
+}
+
 fn install_inner(config: Config, output: &Path) -> Result<()> {
     println!("Install {config:#?} to {}", output.display());
     let cookbook = config.general.cookbook.clone();
@@ -838,15 +1262,7 @@ fn install_inner(config: Config, output: &Path) -> Result<()> {
             skip_partitions: config.general.skip_partitions.unwrap_or(false),
         };
         with_whole_disk(output, &disk_option, move |fs| {
-            if config.general.no_mount.unwrap_or(false) {
-                with_redoxfs_ar(fs, None, move |mount_path| {
-                    install_dir(config, mount_path, cookbook)
-                })
-            } else {
-                with_redoxfs_mount(fs, None, move |mount_path| {
-                    install_dir(config, mount_path, cookbook)
-                })
-            }
+            install_to_redoxfs(fs, config, cookbook)
         })
     }
 }
