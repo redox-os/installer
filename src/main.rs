@@ -365,7 +365,7 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
             return Ok(());
         }
 
-        with_redoxfs_mount(fs, |mount_path: &Path| -> anyhow::Result<()> {
+        with_redoxfs_mount(fs, None, |mount_path: &Path| -> anyhow::Result<()> {
             message!("Loading filesystem.toml");
             let mut config: Config = {
                 let path = root_path.join("filesystem.toml");

@@ -9,8 +9,8 @@ libredox = "0.1"
 pkgar = "0.1.18"
 pkgar-core = "0.1.18"
 pkgar-keys = "0.1.18"
-redox_installer = "0.2.37"
-redox_syscall = "0.5"
+redox_installer = "0.2.41"
+redox_syscall = "0.7"
 toml = "0.5.6"
 
 [dependencies.libcosmic]
