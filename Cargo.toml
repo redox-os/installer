@@ -1,6 +1,6 @@
 [package]
 name = "redox_installer"
-version = "0.2.40"
+version = "0.2.41"
 description = "A Redox filesystem builder"
 license = "MIT"
 authors = ["Jeremy Soller <jackpot51@gmail.com>"]
@@ -34,8 +34,8 @@ pkgar-core = { version = "0.1.19", optional = true }
 pkgar-keys = { version = "0.1.19", optional = true }
 rand = { version = "0.9", optional = true }
 redox-pkg = { version = "0.2.9", features = ["indicatif"], optional = true }
-redox_syscall = { version = "0.6", optional = true }
-redoxfs = { version = "0.8.5", optional = true, default-features = false, features = ["std", "log"] }
+redox_syscall = { version = "0.7", optional = true }
+redoxfs = { version = "0.9", optional = true, default-features = false, features = ["std", "log"] }
 rust-argon2 = { version = "0.8.2", optional = true }
 serde = "1"
 serde_derive = "1.0"
@@ -44,7 +44,7 @@ toml = "0.8"
 uuid = { version = "1.4", features = ["v4"], optional = true }
 
 [target.'cfg(target_os = "redox")'.dependencies]
-libredox = "=0.1.11"
+libredox = "0.1"
 
 [features]
 default = ["installer", "fuse"]
