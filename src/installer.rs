@@ -33,6 +33,7 @@ pub struct DiskOption<'a> {
 }
 
 fn get_target() -> String {
+    // TODO: Configurable from filesystem config?
     env::var("TARGET").unwrap_or(
         option_env!("TARGET").map_or("x86_64-unknown-redox".to_string(), |x| x.to_string()),
     )
@@ -191,6 +192,7 @@ pub fn install_dir(
                 &format!("{}: enter password: ", username),
                 &format!("{}: confirm password: ", username),
             )?
+            .unwrap_or_default()
         } else {
             String::new()
         };
@@ -795,6 +797,20 @@ fn install_inner(config: Config, output: &Path) -> Result<()> {
     if output.is_dir() {
         install_dir(config, output, cookbook)
     } else {
+        if !output.is_file() {
+            let fs_size = config.general.filesystem_size.unwrap_or(0) as u64;
+            // arbitrary size approximately fit just for initfs
+            if fs_size < 32 {
+                bail!("Refusing to create image disk less than 32 MB");
+            }
+            eprintln!(
+                "Creating a new file to {} with size {} MB",
+                output.display(),
+                fs_size
+            );
+            let file = fs::File::create(output)?;
+            file.set_len(fs_size * 1024 * 1024)?;
+        }
         let live = config.general.live_disk.unwrap_or(false);
         let password_opt = config.general.encrypt_disk.clone();
         let password_opt = password_opt.as_ref().map(|p| p.as_bytes());

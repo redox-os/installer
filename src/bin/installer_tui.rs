@@ -11,7 +11,11 @@ use std::{
     path::{Path, PathBuf},
     process,
 };
-use termion::input::TermRead;
+
+// TODO: This is not the TUI a regular user would expect it does
+// 1. Linux: Implement disk listing, use "dd" to write into whole disk
+// 2. Allow partitioning to allow dual boot, possibly an integration with systemd-boot/grub
+// 3. Prompt everything (disk password, users, preconfigured packages, import from existing img)
 
 #[cfg(not(target_os = "redox"))]
 fn disk_paths(_paths: &mut Vec<(PathBuf, u64)>) {}
@@ -32,7 +36,7 @@ fn disk_paths(paths: &mut Vec<(PathBuf, u64)>) {
             }
         }
         Err(err) => {
-            eprintln!("installer_tui: failed to list schemes: {}", err);
+            eprintln!("redox_installer_tui: failed to list schemes: {}", err);
         }
     }
 
@@ -60,7 +64,7 @@ fn disk_paths(paths: &mut Vec<(PathBuf, u64)>) {
                 }
                 Err(err) => {
                     eprintln!(
-                        "installer_tui: failed to list '{}': {}",
+                        "redox_installer_tui: failed to list '{}': {}",
                         scheme.display(),
                         err
                     );
@@ -221,7 +225,8 @@ fn choose_disk() -> PathBuf {
         }
 
         if paths.is_empty() {
-            eprintln!("installer_tui: no drives found");
+            eprintln!("redox_installer_tui: no RedoxFS partition found");
+            eprintln!("redox_installer_tui: this tool is used to overwrite unmounted RedoxFS disk in Redox OS");
             process::exit(1);
         } else {
             eprint!("Select a drive from 1 to {}: ", paths.len());
@@ -229,12 +234,12 @@ fn choose_disk() -> PathBuf {
             let mut line = String::new();
             match io::stdin().read_line(&mut line) {
                 Ok(0) => {
-                    eprintln!("installer_tui: failed to read line: end of input");
+                    eprintln!("redox_installer_tui: failed to read line: end of input");
                     process::exit(1);
                 }
                 Ok(_) => (),
                 Err(err) => {
-                    eprintln!("installer_tui: failed to read line: {}", err);
+                    eprintln!("redox_installer_tui: failed to read line: {}", err);
                     process::exit(1);
                 }
             }
@@ -275,7 +280,11 @@ fn main() {
             match fs::read(&path) {
                 Ok(ok) => ok,
                 Err(err) => {
-                    eprintln!("installer_tui: {}: failed to read: {}", path.display(), err);
+                    eprintln!(
+                        "redox_installer_tui: {}: failed to read: {}",
+                        path.display(),
+                        err
+                    );
                     process::exit(1);
                 }
             }
@@ -290,7 +299,11 @@ fn main() {
             match fs::read(&path) {
                 Ok(ok) => ok,
                 Err(err) => {
-                    eprintln!("installer_tui: {}: failed to read: {}", path.display(), err);
+                    eprintln!(
+                        "redox_installer_tui: {}: failed to read: {}",
+                        path.display(),
+                        err
+                    );
                     process::exit(1);
                 }
             }
@@ -366,13 +379,13 @@ fn main() {
     match res {
         Ok(()) => {
             eprintln!(
-                "installer_tui: installed successfully in {:?}",
+                "redox_installer_tui: installed successfully in {:?}",
                 instant.elapsed()
             );
             process::exit(0);
         }
         Err(err) => {
-            eprintln!("installer_tui: failed to install: {}", err);
+            eprintln!("redox_installer_tui: failed to install: {}", err);
             process::exit(1);
         }
     }
