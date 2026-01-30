@@ -817,7 +817,7 @@ pub fn try_fast_install<D: redoxfs::Disk, F: FnMut(u64, u64)>(
 }
 
 fn install_inner(config: Config, output: &Path) -> Result<()> {
-    println!("Install {config:#?} to {}", output.display());
+    println!("Installing to {}:\n{}", output.display(), config);
     let cookbook = config.general.cookbook.clone();
     let cookbook = cookbook.as_ref().map(|p| p.as_str());
     if output.is_dir() {

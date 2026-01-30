@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
+use std::fmt::Display;
 use std::fs;
 use std::mem;
 use std::path::{Path, PathBuf};
 
 use anyhow::bail;
+use anyhow::Context;
 use anyhow::Result;
 
 pub mod file;
@@ -35,11 +37,11 @@ impl Config {
             Ok(config_data) => match toml::from_str(&config_data) {
                 Ok(config) => config,
                 Err(err) => {
-                    bail!("{}: failed to decode: {}", path.display(), err);
+                    bail!("failed to decode '{}': {}", path.display(), err);
                 }
             },
             Err(err) => {
-                bail!("{}: failed to read: {}", path.display(), err);
+                bail!("failed to read '{}': {}", path.display(), err);
             }
         };
 
@@ -47,7 +49,10 @@ impl Config {
 
         let mut configs = mem::take(&mut config.include)
             .into_iter()
-            .map(|path| Config::from_file(&config_dir.join(path)))
+            .map(|path| {
+                Config::from_file(&config_dir.join(&path))
+                    .with_context(|| format!("Importing from {}", path.display()))
+            })
             .collect::<Result<Vec<Config>>>()?;
         configs.push(config); // Put ourself last to ensure that it overwrites anything else.
 
@@ -88,5 +93,24 @@ impl Config {
         for (group, group_config) in other_groups {
             self.groups.insert(group, group_config);
         }
+    }
+}
+
+impl Display for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "files:")?;
+        for file in &self.files {
+            writeln!(f, "- {}", file)?;
+        }
+        writeln!(f, "users:")?;
+        for (name, user) in &self.users {
+            writeln!(f, "- {}:{}", name, user)?;
+        }
+        write!(f, "packages: ")?;
+        for name in self.packages.keys() {
+            write!(f, " {}", name)?;
+        }
+        writeln!(f, "")?;
+        Ok(())
     }
 }
