@@ -141,11 +141,19 @@ fn install_packages(config: &Config, dest: &Path, cookbook: Option<&str>) -> any
         }
     } else {
         let mut library = Library::new(dest, target, Rc::new(RefCell::new(callback)))?;
+        let mut package_len = packages.len();
         for packagename in packages {
             if !get_head_path(packagename, dest).exists() {
-                println!("Installing package from remote: {packagename}");
+                if package_len == 1 {
+                    println!("Installing package from remote: {packagename}");
+                }
                 library.install(vec![pkg::PackageName::new(packagename)?])?;
+            } else {
+                package_len -= 1;
             }
+        }
+        if package_len != 1 {
+            println!("Installing {} packages from remote", package_len);
         }
         library.apply()?;
     }
