@@ -71,6 +71,10 @@ pub fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<Option<Stri
         }
         password.take_if(|s| s.is_empty());
 
+        if password.is_none() {
+            return Ok(None);
+        }
+
         print!("\n{}", confirm_prompt);
         let confirm_password = stdin.read_passwd(&mut stdout)?;
 
