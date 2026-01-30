@@ -255,29 +255,17 @@ fn choose_disk() -> PathBuf {
     }
 }
 
-fn choose_password() -> Option<String> {
-    eprint!("installer_tui: redoxfs password (empty for none): ");
-
-    let password = io::stdin()
-        .read_passwd(&mut io::stderr())
-        .unwrap()
-        .unwrap_or(String::new());
-
-    eprintln!();
-
-    if password.is_empty() {
-        return None;
-    }
-
-    Some(password)
-}
-
 fn main() {
     let root_path = Path::new("/");
 
     let disk_path = choose_disk();
 
-    let password_opt = choose_password();
+    let Ok(password_opt) = redox_installer::prompt_password(
+        "redox_installer_tui: redoxfs password (empty for none)",
+        "redox_installer_tui: confirm password",
+    ) else {
+        process::exit(1);
+    };
 
     let instant = std::time::Instant::now();
 

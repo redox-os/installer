@@ -56,23 +56,31 @@ fn syscall_error(err: syscall::Error) -> io::Error {
 }
 
 /// Returns a password collected from the user (plaintext)
-fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
+pub fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<Option<String>> {
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
 
-    print!("{}", prompt);
-    let password = stdin.read_passwd(&mut stdout)?;
+    for i in 0..3 {
+        print!("{}", prompt);
+        let mut password = stdin.read_passwd(&mut stdout)?;
+        if let Some(password) = password.as_mut() {
+            *password = password.trim().to_string();
+        }
+        password.take_if(|s| s.is_empty());
 
-    print!("\n{}", confirm_prompt);
-    let confirm_password = stdin.read_passwd(&mut stdout)?;
+        print!("\n{}", confirm_prompt);
+        let confirm_password = stdin.read_passwd(&mut stdout)?;
 
-    // Note: Actually comparing two Option<String> values
-    if confirm_password != password {
-        bail!("passwords do not match");
+        // Note: Actually comparing two Option<String> values
+        if confirm_password == password {
+            return Ok(password);
+        } else if i < 2 {
+            eprintln!("passwords do not match, please try again");
+        }
     }
-    Ok(password.unwrap_or("".to_string()))
+    bail!("passwords do not match, giving up");
 }
 
 fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &Path) -> Result<()> {
@@ -149,29 +157,6 @@ pub fn install_dir(
     output_dir: impl AsRef<Path>,
     cookbook: Option<&str>,
 ) -> Result<()> {
-    //let mut context = liner::Context::new();
-
-    macro_rules! prompt {
-        ($dst:expr, $def:expr, $($arg:tt)*) => {
-            if config.general.prompt.unwrap_or(true) {
-                Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "prompt not currently supported",
-                ))
-                // match unwrap_or_prompt($dst, &mut context, &format!($($arg)*)) {
-                //     Ok(res) => if res.is_empty() {
-                //         Ok($def)
-                //     } else {
-                //         Ok(res)
-                //     },
-                //     Err(err) => Err(err)
-                // }
-            } else {
-                Ok($dst.unwrap_or($def))
-            }
-        };
-    }
-
     let output_dir = output_dir.as_ref();
 
     let output_dir = output_dir.to_owned();
@@ -222,29 +207,16 @@ pub fn install_dir(
             next_gid = gid + 1;
         }
 
-        let name = prompt!(
-            user.name,
-            username.clone(),
-            "{}: name (GECOS) [{}]: ",
-            username,
-            username
-        )?;
-        let home = prompt!(
-            user.home,
-            format!("/home/{}", username),
-            "{}: home [/home/{}]: ",
-            username,
-            username
-        )?;
-        let shell = prompt!(
-            user.shell,
-            "/bin/ion".to_string(),
-            "{}: shell [/bin/ion]: ",
-            username
-        )?;
+        let name = user.name.unwrap_or(username.clone());
+        let home = user.home.unwrap_or(format!("/home/{}", username));
+        let shell = user.shell.unwrap_or("/bin/ion".into());
 
         println!("Adding user {username}:");
-        println!("\tPassword: {password}");
+        if password.is_empty() {
+            println!("\tPassword: unset");
+        } else {
+            println!("\tPassword: set");
+        }
         println!("\tUID: {uid}");
         println!("\tGID: {gid}");
         println!("\tName: {name}");
@@ -852,8 +824,7 @@ fn install_inner(config: Config, output: &Path) -> Result<()> {
 }
 
 /// Install RedoxFS into a new disk file, or a sysroot directory.
-/// This function assumes all interactive prompts resolved by the caller,
-/// so "prompt" option is ignored from this function onward.
+/// This function assumes all interactive prompts resolved by the caller.
 pub fn install(config: Config, output: impl AsRef<Path>) -> Result<()> {
     install_inner(config, output.as_ref())
 }
