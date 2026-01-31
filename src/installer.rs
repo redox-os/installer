@@ -33,6 +33,7 @@ pub struct DiskOption<'a> {
 }
 
 fn get_target() -> String {
+    // TODO: Configurable from filesystem config?
     env::var("TARGET").unwrap_or(
         option_env!("TARGET").map_or("x86_64-unknown-redox".to_string(), |x| x.to_string()),
     )
@@ -56,23 +57,35 @@ fn syscall_error(err: syscall::Error) -> io::Error {
 }
 
 /// Returns a password collected from the user (plaintext)
-fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<String> {
+pub fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<Option<String>> {
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
 
-    print!("{}", prompt);
-    let password = stdin.read_passwd(&mut stdout)?;
+    for i in 0..3 {
+        print!("{}", prompt);
+        let mut password = stdin.read_passwd(&mut stdout)?;
+        if let Some(password) = password.as_mut() {
+            *password = password.trim().to_string();
+        }
+        password.take_if(|s| s.is_empty());
 
-    print!("\n{}", confirm_prompt);
-    let confirm_password = stdin.read_passwd(&mut stdout)?;
+        if password.is_none() {
+            return Ok(None);
+        }
 
-    // Note: Actually comparing two Option<String> values
-    if confirm_password != password {
-        bail!("passwords do not match");
+        print!("\n{}", confirm_prompt);
+        let confirm_password = stdin.read_passwd(&mut stdout)?;
+
+        // Note: Actually comparing two Option<String> values
+        if confirm_password == password {
+            return Ok(password);
+        } else if i < 2 {
+            eprintln!("passwords do not match, please try again");
+        }
     }
-    Ok(password.unwrap_or("".to_string()))
+    bail!("passwords do not match, giving up");
 }
 
 fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &Path) -> Result<()> {
@@ -132,11 +145,19 @@ fn install_packages(config: &Config, dest: &Path, cookbook: Option<&str>) -> any
         }
     } else {
         let mut library = Library::new(dest, target, Rc::new(RefCell::new(callback)))?;
+        let mut package_len = packages.len();
         for packagename in packages {
             if !get_head_path(packagename, dest).exists() {
-                println!("Installing package from remote: {packagename}");
+                if package_len == 1 {
+                    println!("Installing package from remote: {packagename}");
+                }
                 library.install(vec![pkg::PackageName::new(packagename)?])?;
+            } else {
+                package_len -= 1;
             }
+        }
+        if package_len != 1 {
+            println!("Installing {} packages from remote", package_len);
         }
         library.apply()?;
     }
@@ -149,29 +170,6 @@ pub fn install_dir(
     output_dir: impl AsRef<Path>,
     cookbook: Option<&str>,
 ) -> Result<()> {
-    //let mut context = liner::Context::new();
-
-    macro_rules! prompt {
-        ($dst:expr, $def:expr, $($arg:tt)*) => {
-            if config.general.prompt.unwrap_or(true) {
-                Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "prompt not currently supported",
-                ))
-                // match unwrap_or_prompt($dst, &mut context, &format!($($arg)*)) {
-                //     Ok(res) => if res.is_empty() {
-                //         Ok($def)
-                //     } else {
-                //         Ok(res)
-                //     },
-                //     Err(err) => Err(err)
-                // }
-            } else {
-                Ok($dst.unwrap_or($def))
-            }
-        };
-    }
-
     let output_dir = output_dir.as_ref();
 
     let output_dir = output_dir.to_owned();
@@ -206,6 +204,7 @@ pub fn install_dir(
                 &format!("{}: enter password: ", username),
                 &format!("{}: confirm password: ", username),
             )?
+            .unwrap_or_default()
         } else {
             String::new()
         };
@@ -222,29 +221,16 @@ pub fn install_dir(
             next_gid = gid + 1;
         }
 
-        let name = prompt!(
-            user.name,
-            username.clone(),
-            "{}: name (GECOS) [{}]: ",
-            username,
-            username
-        )?;
-        let home = prompt!(
-            user.home,
-            format!("/home/{}", username),
-            "{}: home [/home/{}]: ",
-            username,
-            username
-        )?;
-        let shell = prompt!(
-            user.shell,
-            "/bin/ion".to_string(),
-            "{}: shell [/bin/ion]: ",
-            username
-        )?;
+        let name = user.name.unwrap_or(username.clone());
+        let home = user.home.unwrap_or(format!("/home/{}", username));
+        let shell = user.shell.unwrap_or("/bin/ion".into());
 
         println!("Adding user {username}:");
-        println!("\tPassword: {password}");
+        if password.is_empty() {
+            println!("\tPassword: unset");
+        } else {
+            println!("\tPassword: set");
+        }
         println!("\tUID: {uid}");
         println!("\tGID: {gid}");
         println!("\tName: {name}");
@@ -817,12 +803,26 @@ pub fn try_fast_install<D: redoxfs::Disk, F: FnMut(u64, u64)>(
 }
 
 fn install_inner(config: Config, output: &Path) -> Result<()> {
-    println!("Install {config:#?} to {}", output.display());
+    println!("Installing to {}:\n{}", output.display(), config);
     let cookbook = config.general.cookbook.clone();
     let cookbook = cookbook.as_ref().map(|p| p.as_str());
     if output.is_dir() {
         install_dir(config, output, cookbook)
     } else {
+        if !output.is_file() {
+            let fs_size = config.general.filesystem_size.unwrap_or(0) as u64;
+            // arbitrary size approximately fit just for initfs
+            if fs_size < 32 {
+                bail!("Refusing to create image disk less than 32 MB");
+            }
+            eprintln!(
+                "Creating a new file to {} with size {} MB",
+                output.display(),
+                fs_size
+            );
+            let file = fs::File::create(output)?;
+            file.set_len(fs_size * 1024 * 1024)?;
+        }
         let live = config.general.live_disk.unwrap_or(false);
         let password_opt = config.general.encrypt_disk.clone();
         let password_opt = password_opt.as_ref().map(|p| p.as_bytes());
@@ -852,8 +852,7 @@ fn install_inner(config: Config, output: &Path) -> Result<()> {
 }
 
 /// Install RedoxFS into a new disk file, or a sysroot directory.
-/// This function assumes all interactive prompts resolved by the caller,
-/// so "prompt" option is ignored from this function onward.
+/// This function assumes all interactive prompts resolved by the caller.
 pub fn install(config: Config, output: impl AsRef<Path>) -> Result<()> {
     install_inner(config, output.as_ref())
 }

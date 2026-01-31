@@ -10,22 +10,44 @@ use arg_parser::ArgParser;
 
 use redox_installer::{Config, PackageConfig};
 
+const HELP_STR: &str = r#"
+redox_installer - Redox Installer.
+                  Refer to link below for filesystem config reference:
+                  https://doc.redox-os.org/book/configuration-settings.html
+
+Using redox_installer as an installer:
+  redox_installer <diskpath.img> [--config=file.toml] [--write-bootloader=file.img] [--live] [--no-mount] [--skip-partition]
+    <diskpath.img>        Disk file to write
+    --config              Path to filesystem config TOML
+    --write-bootloader    Path to write separate EFI partition
+    --skip-partition      Skip writing GPT partition tables
+                          Use this only if you plan to use other partition tool
+    --live                Use bootloader configured for live disk
+    --no-mount            Use RedoxFS AR instead of FUSE to write files
+    --cookbook            Use local Redox OS build system rather than downloading packages
+
+Using redox_installer as a configuration parser:
+  redox_installer --config=file.toml [--list-packages|--filesystem-size|--output-config path]
+    --list-packages      List packages will be installed
+    --filesystem-size    Output filesystem size in MB
+    --output-config      Path to write the parsed config as another TOML
+"#;
+
 fn main() {
     let mut parser = ArgParser::new(4)
         .add_opt("b", "cookbook")
         .add_opt("c", "config")
         .add_opt("o", "output-config")
         .add_opt("", "write-bootloader")
+        .add_flag(&["skip-partition"])
         .add_flag(&["filesystem-size"])
-        .add_flag(&["r", "repo-binary"])
+        .add_flag(&["r", "repo-binary"]) // TODO: Remove
         .add_flag(&["l", "list-packages"])
         .add_flag(&["live"])
         .add_flag(&["no-mount"]);
     parser.parse(env::args());
 
-    // Use pre-built binaries for packages as the default.
-    // If not set on the command line or the filesystem config, then build packages from source.
-    let repo_binary = parser.found("repo-binary");
+    let skip_partition = parser.found("skip-partition");
 
     let mut config = if let Some(path) = parser.get_opt("config") {
         match Config::from_file(Path::new(&path)) {
@@ -55,9 +77,8 @@ fn main() {
         ..Default::default()
     });
 
-    // Add command line flags to config, command line takes priority
-    if repo_binary {
-        config.general.repo_binary = Some(true);
+    if skip_partition {
+        config.general.skip_partitions = Some(true);
     }
 
     if parser.found("filesystem-size") {
@@ -148,7 +169,7 @@ fn main() {
                 process::exit(1);
             }
         } else {
-            eprintln!("installer: output or list-packages not found");
+            eprint!("{}", HELP_STR);
             process::exit(1);
         }
     }
