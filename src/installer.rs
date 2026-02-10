@@ -91,13 +91,20 @@ pub fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<Option<Stri
 fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &Path) -> Result<()> {
     let head_path = get_head_path(packagename, dest);
 
-    let public_path = format!("{cookbook}/build/id_ed25519.pub.toml",);
-    let pkgar_path = format!("{cookbook}/repo/{target}/{packagename}.pkgar");
+    let public_path = PathBuf::from(format!("{cookbook}/build/id_ed25519.pub.toml"));
+    let pkgar_path = PathBuf::from(format!("{cookbook}/repo/{target}/{packagename}.pkgar"));
 
-    let pkginfo_path = format!("{cookbook}/repo/{target}/{packagename}.toml");
+    let pkginfo_path = PathBuf::from(format!("{cookbook}/repo/{target}/{packagename}.toml"));
+    if !pkginfo_path.is_file() {
+        bail!("Package is not exist: {}", pkginfo_path.display());
+    }
     let pkginfo = pkg::Package::from_toml(&fs::read_to_string(pkginfo_path)?)?;
 
     if pkginfo.version != "" {
+        if !pkgar_path.is_file() {
+            bail!("Package is not exist: {}", pkgar_path.display());
+        }
+
         pkgar::extract(&public_path, &pkgar_path, dest)?;
         pkgar::split(&public_path, &pkgar_path, head_path, Option::<&str>::None)?;
     }
