@@ -1,5 +1,4 @@
-#[cfg(target_os = "redox")]
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use anyhow::{bail, Result};
 use pkg::Library;
 use rand::{rngs::OsRng, TryRngCore};
@@ -249,44 +248,7 @@ pub fn install_dir(
             .create(&output_dir)?;
 
         if uid >= 1000 {
-            // Create XDG user dirs
-            //TODO: move to some autostart program?
-            for xdg_folder in &[
-                "Desktop",
-                "Documents",
-                "Downloads",
-                "Music",
-                "Pictures",
-                "Public",
-                "Templates",
-                "Videos",
-                ".config",
-                ".local",
-                ".local/share",
-                ".local/share/Trash",
-                ".local/share/Trash/info",
-            ] {
-                FileConfig::new_directory(format!("{}/{}", home, xdg_folder))
-                    .with_mod(0o0700, uid, gid)
-                    .create(&output_dir)?;
-            }
-
-            FileConfig::new_file(
-                format!("{}/.config/user-dirs.dirs", home),
-                r#"# Produced by redox installer
-XDG_DESKTOP_DIR="$HOME/Desktop"
-XDG_DOCUMENTS_DIR="$HOME/Documents"
-XDG_DOWNLOAD_DIR="$HOME/Downloads"
-XDG_MUSIC_DIR="$HOME/Music"
-XDG_PICTURES_DIR="$HOME/Pictures"
-XDG_PUBLICSHARE_DIR="$HOME/Public"
-XDG_TEMPLATES_DIR="$HOME/Templates"
-XDG_VIDEOS_DIR="$HOME/Videos"
-"#
-                .to_string(),
-            )
-            .with_mod(0o0600, uid, gid)
-            .create(&output_dir)?;
+            prepare_user_home(&output_dir, uid, gid, &home)?;
         }
 
         let password = hash_password(&password)?;
@@ -335,6 +297,88 @@ XDG_VIDEOS_DIR="$HOME/Videos"
             .create(&output_dir)?;
     }
 
+    Ok(())
+}
+
+fn prepare_user_home(
+    output_dir: &PathBuf,
+    uid: u32,
+    gid: u32,
+    home: &String,
+) -> Result<(), anyhow::Error> {
+    for xdg_folder in &[
+        "Desktop",
+        "Documents",
+        "Downloads",
+        "Music",
+        "Pictures",
+        "Public",
+        "Templates",
+        "Videos",
+        ".config",
+        ".local",
+        ".local/share",
+        ".local/share/Trash",
+        ".local/share/Trash/info",
+    ] {
+        FileConfig::new_directory(format!("{}/{}", home, xdg_folder))
+            .with_mod(0o0700, uid, gid)
+            .create(output_dir)?;
+    }
+    FileConfig::new_file(
+        format!("{}/.config/user-dirs.dirs", home),
+        r#"# Produced by redox installer
+XDG_DESKTOP_DIR="$HOME/Desktop"
+XDG_DOCUMENTS_DIR="$HOME/Documents"
+XDG_DOWNLOAD_DIR="$HOME/Downloads"
+XDG_MUSIC_DIR="$HOME/Music"
+XDG_PICTURES_DIR="$HOME/Pictures"
+XDG_PUBLICSHARE_DIR="$HOME/Public"
+XDG_TEMPLATES_DIR="$HOME/Templates"
+XDG_VIDEOS_DIR="$HOME/Videos"
+"#
+        .to_string(),
+    )
+    .with_mod(0o0600, uid, gid)
+    .create(output_dir)?;
+
+    let skel_dir = output_dir.join("etc/skel");
+    if skel_dir.is_dir() {
+        copy_dir_all(&skel_dir, home.clone(), output_dir, uid, gid)?;
+    }
+    Ok(())
+}
+
+fn copy_dir_all(
+    src: impl AsRef<Path>,
+    dst: String,
+    output_dir: &Path,
+    uid: u32,
+    gid: u32,
+) -> anyhow::Result<()> {
+    if !Path::new(dst.as_str()).is_dir() {
+        FileConfig::new_directory(dst.clone())
+            .with_mod(0o0700, uid, gid)
+            .create(&output_dir)?;
+    }
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let dst_path = format!("{}/{}", dst, entry.file_name().display());
+        if file_type.is_dir() {
+            copy_dir_all(entry.path(), dst_path, output_dir, uid, gid)?;
+        } else if file_type.is_file() {
+            FileConfig::new_file(
+                dst_path,
+                fs::read_to_string(entry.path())
+                    .with_context(|| format!("Reading {}", entry.path().display()))?,
+            )
+            .with_mod(0o0600, uid, gid)
+            .create(&output_dir)?;
+        } else if file_type.is_symlink() {
+            // TODO
+        }
+    }
     Ok(())
 }
 
