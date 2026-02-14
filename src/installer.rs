@@ -814,7 +814,7 @@ pub fn try_fast_install<D: redoxfs::Disk, F: FnMut(u64, u64)>(
             prot: flag::PROT_READ,
             flags: flag::MAP_SHARED,
         })
-        .map_err(|err| anyhow!("failed to mmap livedisk: {}", err))?;
+        .map_err(|err| anyhow::anyhow!("failed to mmap livedisk: {}", err))?;
 
         std::slice::from_raw_parts(base as *const u8, size)
     };
