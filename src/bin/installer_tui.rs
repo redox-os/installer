@@ -385,7 +385,7 @@ fn main() {
             process::exit(0);
         }
         Err(err) => {
-            eprintln!("redox_installer_tui: failed to install: {}", err);
+            eprintln!("redox_installer_tui: failed to install: {:?}", err);
             process::exit(1);
         }
     }

@@ -104,8 +104,10 @@ fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &P
             bail!("Package is not exist: {}", pkgar_path.display());
         }
 
-        pkgar::extract(&public_path, &pkgar_path, dest)?;
-        pkgar::split(&public_path, &pkgar_path, head_path, Option::<&str>::None)?;
+        pkgar::extract(&public_path, &pkgar_path, dest)
+            .with_context(|| format!("failed to pkgar extract {}", pkgar_path.display()))?;
+        pkgar::split(&public_path, &pkgar_path, head_path, Option::<&str>::None)
+            .with_context(|| format!("failed to pkgar split {}", pkgar_path.display()))?;
     }
 
     // Recursively install any runtime dependencies.

@@ -165,7 +165,7 @@ fn main() {
 
         if let Some(path) = parser.args.first() {
             if let Err(err) = redox_installer::install(config, path) {
-                eprintln!("installer: failed to install: {}", err);
+                eprintln!("installer: failed to install: {:?}", err);
                 process::exit(1);
             }
         } else {

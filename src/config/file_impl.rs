@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use libc::{gid_t, uid_t};
 
 use std::ffi::{CString, OsStr};
@@ -34,21 +34,25 @@ impl crate::FileConfig {
 
         if self.directory {
             println!("Create directory {}", target_file.display());
-            fs::create_dir_all(&target_file)?;
+            fs::create_dir_all(&target_file)
+                .with_context(|| format!("failed to create directory {}", target_file.display()))?;
             self.apply_perms(&target_file)?;
             return Ok(());
         } else if let Some(parent) = target_file.parent() {
             println!("Create file parent {}", parent.display());
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create file parent {}", parent.display()))?;
         }
 
         if self.symlink {
             println!("Create symlink {}", target_file.display());
-            symlink(&OsStr::new(&self.data), &target_file)?;
+            symlink(&OsStr::new(&self.data), &target_file)
+                .with_context(|| format!("failed to create symlink {}", target_file.display()))?;
             Ok(())
         } else {
             println!("Create file {}", target_file.display());
-            let mut file = File::create(&target_file)?;
+            let mut file = File::create(&target_file)
+                .with_context(|| format!("failed to create file {}", target_file.display()))?;
             file.write_all(self.data.as_bytes())?;
 
             self.apply_perms(target_file)
@@ -64,9 +68,11 @@ impl crate::FileConfig {
         let gid = self.gid.unwrap_or(!0);
 
         // chmod
-        fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+        fs::set_permissions(path, fs::Permissions::from_mode(mode))
+            .with_context(|| format!("failed to set permissions on {}", path.display()))?;
 
         // chown
         chown(path, uid, gid, self.recursive_chown)
+            .with_context(|| format!("failed to chown {}", path.display()))
     }
 }
