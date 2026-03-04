@@ -45,9 +45,14 @@ impl crate::FileConfig {
         }
 
         if self.symlink {
-            println!("Create symlink {}", target_file.display());
-            symlink(&OsStr::new(&self.data), &target_file)
-                .with_context(|| format!("failed to create symlink {}", target_file.display()))?;
+            println!("Create symlink {} to {}", target_file.display(), self.data);
+            symlink(&OsStr::new(&self.data), &target_file).with_context(|| {
+                format!(
+                    "failed to create symlink {} to {}",
+                    target_file.display(),
+                    self.data
+                )
+            })?;
             Ok(())
         } else {
             println!("Create file {}", target_file.display());
