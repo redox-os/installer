@@ -46,6 +46,11 @@ impl crate::FileConfig {
 
         if self.symlink {
             println!("Create symlink {} to {}", target_file.display(), self.data);
+            if target_file.is_symlink() {
+                fs::remove_file(&target_file).with_context(|| {
+                    format!("failed to remove old symlink {}", target_file.display())
+                })?;
+            }
             symlink(&OsStr::new(&self.data), &target_file).with_context(|| {
                 format!(
                     "failed to create symlink {} to {}",
