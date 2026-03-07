@@ -549,7 +549,7 @@ pub fn fetch_bootloaders(
         .insert("bootloader".to_string(), PackageConfig::default());
     install_packages(&bootloader_config, &bootloader_dir, cookbook)?;
 
-    let boot_dir = bootloader_dir.join("boot");
+    let boot_dir = bootloader_dir.join("usr/lib/boot");
     let bios_path = boot_dir.join(if live {
         "bootloader-live.bios"
     } else {
