@@ -102,49 +102,7 @@ fn main() {
                 process::exit(1);
             }
 
-            // Add cookbook key to config
-            let key_path = Path::new(&path).join("build/id_ed25519.pub.toml");
-            match fs::read_to_string(&key_path) {
-                Ok(data) => {
-                    config.files.push(redox_installer::FileConfig {
-                        path: "pkg/id_ed25519.pub.toml".to_string(),
-                        data,
-                        ..Default::default()
-                    });
-                    Some(path)
-                }
-                Err(err) => {
-                    // if there are no recipes coming from the cookbook, this is not a fatal error
-                    if config
-                        .packages
-                        .clone()
-                        .into_iter()
-                        .any(|(_packagename, package)| match package {
-                            PackageConfig::Empty => false,
-                            PackageConfig::Spec {
-                                version: None,
-                                git: None,
-                                path: None,
-                            } => false,
-                            _ => true,
-                        })
-                    {
-                        eprintln!(
-                            "installer: {}: failed to read cookbook key: {}",
-                            key_path.display(),
-                            err
-                        );
-                        process::exit(1);
-                    } else {
-                        eprintln!(
-                            "installer: {}: (non-fatal) missing cookbook key: {}",
-                            key_path.display(),
-                            err
-                        );
-                        None
-                    }
-                }
-            }
+            Some(path)
         } else {
             None
         };

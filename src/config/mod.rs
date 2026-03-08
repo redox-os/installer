@@ -8,6 +8,8 @@ use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
 
+use crate::PackageConfig;
+
 pub mod file;
 #[cfg(feature = "installer")]
 pub mod file_impl;
@@ -32,6 +34,7 @@ pub struct Config {
 }
 
 impl Config {
+    /// Load installer config from a TOML path
     pub fn from_file(path: &Path) -> Result<Self> {
         let mut config: Config = match fs::read_to_string(&path) {
             Ok(config_data) => match toml::from_str(&config_data) {
@@ -63,6 +66,21 @@ impl Config {
         }
 
         Ok(config)
+    }
+
+    /// Load hardcoded install config to fetch bootloaders
+    pub fn bootloader_config() -> Self {
+        let mut bootloader_config = Config::default();
+        // TODO: This is unused
+        bootloader_config.files.push(file::FileConfig {
+            path: "/etc/pkg.d/50_redox".to_string(),
+            data: "https://static.redox-os.org/pkg".to_string(),
+            ..Default::default()
+        });
+        bootloader_config
+            .packages
+            .insert("bootloader".to_string(), PackageConfig::default());
+        bootloader_config
     }
 
     pub fn merge(&mut self, other: Config) {

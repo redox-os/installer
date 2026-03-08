@@ -87,49 +87,8 @@ pub fn prompt_password(prompt: &str, confirm_prompt: &str) -> Result<Option<Stri
     bail!("passwords do not match, giving up");
 }
 
-fn install_local_pkgar(cookbook: &str, target: &str, packagename: &str, dest: &Path) -> Result<()> {
-    let head_path = get_head_path(packagename, dest);
-
-    let public_path = PathBuf::from(format!("{cookbook}/build/id_ed25519.pub.toml"));
-    let pkgar_path = PathBuf::from(format!("{cookbook}/repo/{target}/{packagename}.pkgar"));
-
-    let pkginfo_path = PathBuf::from(format!("{cookbook}/repo/{target}/{packagename}.toml"));
-    if !pkginfo_path.is_file() {
-        bail!("Package is not exist: {}", pkginfo_path.display());
-    }
-    let pkginfo = pkg::Package::from_toml(&fs::read_to_string(pkginfo_path)?)?;
-
-    if pkginfo.version != "" {
-        if !pkgar_path.is_file() {
-            bail!("Package is not exist: {}", pkgar_path.display());
-        }
-
-        pkgar::extract(&public_path, &pkgar_path, dest)
-            .with_context(|| format!("failed to pkgar extract {}", pkgar_path.display()))?;
-        pkgar::split(&public_path, &pkgar_path, head_path, Option::<&str>::None)
-            .with_context(|| format!("failed to pkgar split {}", pkgar_path.display()))?;
-    }
-
-    // Recursively install any runtime dependencies.
-    for dep in pkginfo.depends.iter() {
-        let depname = dep.as_str();
-        if !get_head_path(depname, dest).exists() {
-            println!("Installing runtime dependency for {packagename} from local repo: {depname}");
-            install_local_pkgar(cookbook, target, depname, dest)?;
-        }
-    }
-
-    Ok(())
-}
-
-fn get_head_path(packagename: &str, dest: &Path) -> PathBuf {
-    dest.join(format!("pkg/packages/{packagename}.pkgar_head"))
-}
-
 fn install_packages(config: &Config, dest: &Path, cookbook: Option<&str>) -> anyhow::Result<()> {
     let target = &get_target();
-
-    let callback = pkg::callback::IndicatifCallback::new();
 
     let packages: Vec<&String> = config
         .packages
@@ -140,35 +99,30 @@ fn install_packages(config: &Config, dest: &Path, cookbook: Option<&str>) -> any
         })
         .collect();
 
-    if let Some(cookbook) = cookbook {
-        let dest_pkg = dest.join("pkg/packages");
-        if !Path::new(&dest_pkg).is_dir() {
-            fs::create_dir_all(&dest_pkg)?;
-        }
-        for packagename in packages {
-            if !get_head_path(packagename, dest).exists() {
-                println!("Installing package from local repo: {}", packagename);
-                install_local_pkgar(cookbook, target, packagename, dest)?;
-            }
-        }
+    let mut library = if let Some(cookbook) = cookbook {
+        let callback = pkg::callback::PlainCallback::new();
+        let repo = Path::new(cookbook).join("repo");
+        let pubkey = Path::new(cookbook).join("build");
+        Library::new_local(
+            repo,
+            pubkey,
+            dest.to_path_buf(),
+            target,
+            Rc::new(RefCell::new(callback)),
+        )
     } else {
-        let mut library = Library::new(dest, target, Rc::new(RefCell::new(callback)))?;
-        let mut package_len = packages.len();
-        for packagename in packages {
-            if !get_head_path(packagename, dest).exists() {
-                if package_len == 1 {
-                    println!("Installing package from remote: {packagename}");
-                }
-                library.install(vec![pkg::PackageName::new(packagename)?])?;
-            } else {
-                package_len -= 1;
-            }
-        }
-        if package_len != 1 {
-            println!("Installing {} packages from remote", package_len);
-        }
-        library.apply()?;
-    }
+        let callback = pkg::callback::IndicatifCallback::new();
+        Library::new_remote(
+            &vec!["https://static.redox-os.org/pkg"],
+            dest,
+            target,
+            Rc::new(RefCell::new(callback)),
+        )
+    }?;
+
+    let packages = pkg::PackageName::from_list(packages)?;
+    library.install(packages)?;
+    library.apply()?;
 
     Ok(())
 }
@@ -537,18 +491,8 @@ pub fn fetch_bootloaders(
 
     fs::create_dir(&bootloader_dir)?;
 
-    let mut bootloader_config = Config::default();
+    let mut bootloader_config = Config::bootloader_config();
     bootloader_config.general = config.general.clone();
-    // Ensure a pkgar remote is available
-    FileConfig {
-        path: "/etc/pkg.d/50_redox".to_string(),
-        data: "https://static.redox-os.org/pkg".to_string(),
-        ..Default::default()
-    }
-    .create(&bootloader_dir)?;
-    bootloader_config
-        .packages
-        .insert("bootloader".to_string(), PackageConfig::default());
     install_packages(&bootloader_config, &bootloader_dir, cookbook)?;
 
     let boot_dir = bootloader_dir.join("usr/lib/boot");
