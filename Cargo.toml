@@ -45,6 +45,7 @@ uuid = { version = "1.4", features = ["v4"], optional = true }
 
 [target.'cfg(target_os = "redox")'.dependencies]
 libredox = "0.1"
+ring = "=0.17.8"
 
 [features]
 default = ["installer", "fuse"]

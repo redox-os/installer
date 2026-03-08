@@ -1516,6 +1516,7 @@ dependencies = [
  "redox-pkg",
  "redox_syscall",
  "redoxfs",
+ "ring",
  "rust-argon2",
  "serde",
  "serde_derive",
@@ -1645,14 +1646,14 @@ dependencies = [
 
 [[package]]
 name = "ring"
-version = "0.17.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7"
+version = "0.17.8"
+source = "git+https://gitlab.redox-os.org/redox-os/ring.git?branch=redox-0.17.8#fce20f12b6aad164a1a7e13ae1dcb46422b171c0"
 dependencies = [
  "cc",
  "cfg-if",
  "getrandom 0.2.17",
  "libc",
+ "spin",
  "untrusted",
  "windows-sys 0.52.0",
 ]
@@ -1873,6 +1874,12 @@ dependencies = [
  "libc",
  "windows-sys 0.60.2",
 ]
+
+[[package]]
+name = "spin"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 
 [[package]]
 name = "stable_deref_trait"
