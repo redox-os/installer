@@ -19,7 +19,7 @@ Using redox_installer as an installer:
   redox_installer <diskpath.img> [--config=file.toml] [--write-bootloader=file.img] [--live] [--no-mount] [--skip-partition]
     <diskpath.img>        Disk file to write
     --config              Path to filesystem config TOML
-    --write-bootloader    Path to write separate EFI partition
+    --write-bootloader    Path to write UEFI bootloader to in addition to the embedded ESP
     --skip-partition      Skip writing GPT partition tables
                           Use this only if you plan to use other partition tool
     --live                Use bootloader configured for live disk

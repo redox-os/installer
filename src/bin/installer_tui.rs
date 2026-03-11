@@ -275,7 +275,7 @@ fn main() {
     let instant = std::time::Instant::now();
 
     let bootloader_bios = {
-        let path = root_path.join("boot").join("bootloader.bios");
+        let path = root_path.join("usr/lib/boot/bootloader.bios");
         if path.exists() {
             match fs::read(&path) {
                 Ok(ok) => ok,
@@ -294,7 +294,7 @@ fn main() {
     };
 
     let bootloader_efi = {
-        let path = root_path.join("boot").join("bootloader.efi");
+        let path = root_path.join("usr/lib/boot/bootloader.efi");
         if path.exists() {
             match fs::read(&path) {
                 Ok(ok) => ok,

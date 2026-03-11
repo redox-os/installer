@@ -200,7 +200,7 @@ pub fn install_dir(
         println!("\tShell: {shell}");
 
         FileConfig::new_directory(home.clone())
-            .with_recursive_mod(0o777, uid, gid)
+            .with_recursive_mod(0o700, uid, gid)
             .create(&output_dir)?;
 
         if uid >= 1000 {
