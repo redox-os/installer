@@ -36,7 +36,7 @@ rand = { version = "0.9", optional = true }
 redox-pkg = { version = "0.3", features = ["indicatif"], optional = true }
 redox_syscall = { version = "0.7", optional = true }
 redoxfs = { version = "0.9", optional = true, default-features = false, features = ["std", "log"] }
-rust-argon2 = { version = "0.8.2", optional = true }
+rust-argon2 = { version = "3", optional = true }
 serde = "1"
 serde_derive = "1.0"
 termion = { version = "4", optional = true }
