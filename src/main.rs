@@ -618,6 +618,8 @@ impl Application for Window {
                     }
                 } else {
                     widgets.push(text("No drives found").into());
+                    // TODO: expose disk.pci-*-*nvme/* */ scheme to user
+                    widgets.push(text("(try to rerun with sudo)").into());
                 }
             }
             Page::Install(progress, description) => {
