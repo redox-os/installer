@@ -577,7 +577,7 @@ impl Application for Window {
         Task::none()
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         let mut widgets = Vec::new();
         match &self.page {
             Page::Sudo(password) => {

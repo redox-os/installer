@@ -1393,7 +1393,7 @@ checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 [[package]]
 name = "dpi"
 version = "0.1.1"
-source = "git+https://github.com/pop-os/winit.git?tag=iced-xdg-surface-0.13-rc#dd46a1499bcc38f2134ab869e8860a32e091c55b"
+source = "git+https://gitlab.redox-os.org/redox-os/winit?branch=redox-0.30.5#a0d14b4f2466afec886bcfb7e5d5d7eb9d703a60"
 
 [[package]]
 name = "drm"
@@ -4451,8 +4451,6 @@ dependencies = [
 [[package]]
 name = "redox_installer"
 version = "0.2.42"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96eec913394f588c8c7c29b9f8bfa0a56b53d2545e3ba03437da08205c63bd6f"
 dependencies = [
  "anyhow",
  "arg_parser",
@@ -6778,7 +6776,7 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 [[package]]
 name = "winit"
 version = "0.30.5"
-source = "git+https://github.com/pop-os/winit.git?tag=iced-xdg-surface-0.13-rc#dd46a1499bcc38f2134ab869e8860a32e091c55b"
+source = "git+https://gitlab.redox-os.org/redox-os/winit?branch=redox-0.30.5#a0d14b4f2466afec886bcfb7e5d5d7eb9d703a60"
 dependencies = [
  "ahash",
  "android-activity",
