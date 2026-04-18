@@ -1,0 +1,27 @@
+[package]
+name = "redox_installer_gui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+libredox = "0.1"
+pkgar = "0.2"
+pkgar-core = "0.2"
+pkgar-keys = "0.2"
+redox_installer = { path = ".." }
+redox_syscall = "0.7"
+toml = "0.8"
+
+[dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic.git"
+# use the same rev with other cosmic app
+rev = "384e8f6e219bb458720eafa5bb971b832c057f23"
+default-features = false
+features = ["winit"]
+
+[patch.crates-io]
+ring = { git = "https://gitlab.redox-os.org/redox-os/ring.git", branch = "redox-0.17.8" }
+
+[patch.'https://github.com/pop-os/winit']
+winit = { git = "https://gitlab.redox-os.org/redox-os/winit", branch = "redox-0.30.5" }
