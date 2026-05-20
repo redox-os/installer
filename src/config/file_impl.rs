@@ -60,9 +60,19 @@ impl crate::FileConfig {
             })?;
             Ok(())
         } else {
-            println!("Create file {}", target_file.display());
-            let mut file = File::create(&target_file)
-                .with_context(|| format!("failed to create file {}", target_file.display()))?;
+            let action = if self.append { "Append" } else { "Create" };
+            println!("{action} file {}", target_file.display());
+
+            let mut file = if self.append {
+                fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&target_file)
+                    .with_context(|| format!("failed to append file {}", target_file.display()))?
+            } else {
+                File::create(&target_file)
+                    .with_context(|| format!("failed to create file {}", target_file.display()))?
+            };
             file.write_all(self.data.as_bytes())?;
 
             self.apply_perms(target_file)
