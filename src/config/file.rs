@@ -1,5 +1,9 @@
 use std::fmt::Display;
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct FileConfig {
     pub path: String,
@@ -15,6 +19,8 @@ pub struct FileConfig {
     pub recursive_chown: bool,
     #[serde(default)]
     pub postinstall: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub append: bool,
 }
 
 impl FileConfig {
@@ -67,6 +73,9 @@ impl Display for FileConfig {
             )?;
             if self.postinstall {
                 write!(f, "!")?;
+            }
+            if self.append {
+                write!(f, " append=yes")?;
             }
         }
         if let Some(uid) = self.uid {
