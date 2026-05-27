@@ -3,10 +3,13 @@ extern crate redox_installer;
 extern crate serde;
 extern crate toml;
 
+use std::cell::RefCell;
 use std::path::Path;
+use std::rc::Rc;
 use std::{env, fs, process};
 
 use arg_parser::ArgParser;
+use pkg::net_backend::DownloadBackend;
 
 use redox_installer::{Config, PackageConfig};
 
@@ -25,6 +28,7 @@ Using redox_installer as an installer:
     --live                Use bootloader configured for live disk
     --no-mount            Use RedoxFS AR instead of FUSE to write files
     --cookbook            Use local Redox OS build system rather than downloading packages
+    --config-name         Name of the filesystem configuration used for os-release VARIANT
 
 Using redox_installer as a configuration parser:
   redox_installer --config=file.toml [--list-packages|--filesystem-size|--output-config path]
@@ -33,9 +37,80 @@ Using redox_installer as a configuration parser:
     --output-config      Path to write the parsed config as another TOML
 "#;
 
+fn os_release_quote(value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{}\"", escaped)
+}
+
+fn build_id_from_repo_toml(repo_toml: &str) -> Option<String> {
+    toml::from_str::<toml::Value>(repo_toml)
+        .ok()?
+        .get("build_id")?
+        .as_str()
+        .and_then(|value| {
+            if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        })
+}
+
+fn local_repo_build_id(cookbook: &str) -> Option<String> {
+    let repo_toml = Path::new(cookbook)
+        .join("repo")
+        .join(redox_installer::get_target())
+        .join("repo.toml");
+    let repo_toml = fs::read_to_string(repo_toml).ok()?;
+    build_id_from_repo_toml(&repo_toml)
+}
+
+fn remote_repo_build_id() -> Option<String> {
+    let callback = Rc::new(RefCell::new(pkg::callback::SilentCallback::new()));
+    let download_backend = pkg::net_backend::DefaultNetBackend::new().ok()?;
+    let mut repo = pkg::RepoManager::new(callback, Box::new(download_backend));
+    repo.add_remote(
+        "https://static.redox-os.org/pkg",
+        &redox_installer::get_target(),
+    )
+    .ok()?;
+
+    let package = pkg::PackageName::new("repo").ok()?;
+    let (repo_toml, _) = repo.get_package_toml(&package).ok()?;
+    build_id_from_repo_toml(&repo_toml)
+}
+
+fn append_os_release_metadata(
+    config: &mut Config,
+    config_name: Option<&str>,
+    build_id: Option<String>,
+) {
+    let mut data = String::new();
+    if let Some(config_name) = config_name.filter(|value| !value.is_empty()) {
+        data.push_str("VARIANT=");
+        data.push_str(&os_release_quote(config_name));
+        data.push('\n');
+    }
+    if let Some(build_id) = build_id.filter(|value| !value.is_empty()) {
+        data.push_str("BUILD_ID=");
+        data.push_str(&os_release_quote(&build_id));
+        data.push('\n');
+    }
+
+    if !data.is_empty() {
+        config.files.push(redox_installer::FileConfig {
+            path: "/usr/lib/os-release".to_string(),
+            data,
+            append: true,
+            ..Default::default()
+        });
+    }
+}
+
 fn main() {
     let mut parser = ArgParser::new(4)
         .add_opt("b", "cookbook")
+        .add_opt("", "config-name")
         .add_opt("c", "config")
         .add_opt("o", "output-config")
         .add_opt("", "write-bootloader")
@@ -106,6 +181,17 @@ fn main() {
         } else {
             None
         };
+
+        let build_id = if let Some(cookbook) = cookbook.as_deref() {
+            local_repo_build_id(cookbook)
+        } else {
+            remote_repo_build_id()
+        };
+        append_os_release_metadata(
+            &mut config,
+            parser.get_opt("config-name").as_deref(),
+            build_id,
+        );
 
         if cookbook.is_some() {
             config.general.cookbook = cookbook;
