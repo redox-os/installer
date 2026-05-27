@@ -31,7 +31,7 @@ pub struct DiskOption<'a> {
     pub skip_partitions: bool,
 }
 
-fn get_target() -> String {
+pub fn get_target() -> String {
     // TODO: Configurable from filesystem config?
     env::var("TARGET").unwrap_or(
         option_env!("TARGET").map_or("x86_64-unknown-redox".to_string(), |x| x.to_string()),
