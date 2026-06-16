@@ -2,14 +2,12 @@ use anyhow::format_err;
 use cosmic::{
     app::{self, Task},
     iced::{
-        self, executor, futures::sink::SinkExt, stream, widget::row, window, Alignment, Size,
-        Subscription,
+        self, executor, futures::sink::SinkExt, widget::row, window, Alignment, Size, Subscription,
     },
-    widget::{
-        button, column, horizontal_space, progress_bar, radio, text, text_input, vertical_space,
-    },
+    widget::{button, column, progress_bar, radio, space, text, text_input},
     Application, ApplicationExt, Core, Element,
 };
+use futures_channel::mpsc;
 use pkgar::{ext::EntryExt, PackageHead};
 use pkgar_core::PackageSrc;
 use pkgar_keys::PublicKeyFile;
@@ -471,6 +469,55 @@ struct Window {
     worker_opt: Option<Worker>,
 }
 
+enum State {
+    Ready,
+    Waiting(mpsc::UnboundedReceiver<Message>),
+    Finished,
+}
+
+impl Window {
+    fn worker_stream() -> impl iced::futures::Stream<Item = Message> {
+        iced::stream::channel(100, |mut output: mpsc::Sender<Message>| async move {
+            let mut state = State::Ready;
+            loop {
+                let (message, new_state) = match state {
+                    State::Ready => {
+                        let (command_sender, command_receiver) = std::sync::mpsc::channel();
+
+                        let (message_sender, message_receiver) = mpsc::unbounded();
+
+                        //TODO: kill worker thread?
+                        let join_handle = std::thread::spawn(move || {
+                            while let Ok((disk_path, password_opt)) = command_receiver.recv() {
+                                println!("Installing to {:?}", disk_path);
+                                install(disk_path, password_opt, |message| {
+                                    message_sender.unbounded_send(message).unwrap();
+                                });
+                            }
+                        });
+
+                        let worker = Worker {
+                            command_sender,
+                            join_handle: std::sync::Arc::new(join_handle),
+                        };
+
+                        (Message::Worker(worker), State::Waiting(message_receiver))
+                    }
+                    State::Waiting(mut message_receiver) => {
+                        use iced::futures::StreamExt;
+                        match message_receiver.next().await {
+                            Some(message) => (message, State::Waiting(message_receiver)),
+                            None => (Message::None, State::Finished),
+                        }
+                    }
+                    State::Finished => iced::futures::future::pending().await,
+                };
+                output.send(message).await.unwrap();
+                state = new_state;
+            }
+        })
+    }
+}
 impl Application for Window {
     type Executor = executor::Default;
     type Flags = ();
@@ -598,7 +645,7 @@ impl Application for Window {
                         widgets.push(
                             row![
                                 radio(text(disk_path), disk_i, *disk_i_opt, Message::DiskChoose),
-                                horizontal_space(),
+                                space::horizontal(),
                                 text(format_size(*disk_size)),
                             ]
                             .into(),
@@ -606,10 +653,10 @@ impl Application for Window {
                     }
 
                     if let Some(disk_i) = *disk_i_opt {
-                        widgets.push(vertical_space().into());
+                        widgets.push(space::vertical().into());
                         widgets.push(
                             row![
-                                horizontal_space(),
+                                space::horizontal(),
                                 button::destructive("Confirm")
                                     .on_press(Message::DiskConfirm(disk_i)),
                             ]
@@ -624,16 +671,16 @@ impl Application for Window {
             }
             Page::Install(progress, description) => {
                 widgets.push(text("Installation progress:").size(24).into());
-                widgets.push(progress_bar(0.0..=100.0, *progress as f32).into());
+                widgets.push(progress_bar::determinate_linear(*progress as f32 / 100.).into());
                 widgets.push(text(description).into());
             }
             Page::Success(description) => {
                 widgets.push(text("Installation complete!").size(24).into());
                 widgets.push(text(description).into());
-                widgets.push(vertical_space().into());
+                widgets.push(space::vertical().into());
                 widgets.push(
                     row![
-                        horizontal_space(),
+                        space::horizontal(),
                         button::standard("Exit").on_press(Message::Exit),
                     ]
                     .into(),
@@ -652,54 +699,6 @@ impl Application for Window {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        enum State {
-            Ready,
-            Waiting(iced::futures::channel::mpsc::UnboundedReceiver<Message>),
-            Finished,
-        }
-
-        Subscription::run_with_id(
-            std::any::TypeId::of::<Worker>(),
-            stream::channel(100, |mut output| async move {
-                let mut state = State::Ready;
-                loop {
-                    let (message, new_state) = match state {
-                        State::Ready => {
-                            let (command_sender, command_receiver) = std::sync::mpsc::channel();
-
-                            let (message_sender, message_receiver) =
-                                iced::futures::channel::mpsc::unbounded();
-
-                            //TODO: kill worker thread?
-                            let join_handle = std::thread::spawn(move || {
-                                while let Ok((disk_path, password_opt)) = command_receiver.recv() {
-                                    println!("Installing to {:?}", disk_path);
-                                    install(disk_path, password_opt, |message| {
-                                        message_sender.unbounded_send(message).unwrap();
-                                    });
-                                }
-                            });
-
-                            let worker = Worker {
-                                command_sender,
-                                join_handle: Arc::new(join_handle),
-                            };
-
-                            (Message::Worker(worker), State::Waiting(message_receiver))
-                        }
-                        State::Waiting(mut message_receiver) => {
-                            use iced::futures::StreamExt;
-                            match message_receiver.next().await {
-                                Some(message) => (message, State::Waiting(message_receiver)),
-                                None => (Message::None, State::Finished),
-                            }
-                        }
-                        State::Finished => iced::futures::future::pending().await,
-                    };
-                    output.send(message).await.unwrap();
-                    state = new_state;
-                }
-            }),
-        )
+        Subscription::run(Self::worker_stream)
     }
 }
