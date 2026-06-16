@@ -74,25 +74,6 @@ fn disk_paths(paths: &mut Vec<(PathBuf, u64)>) {
     }
 }
 
-const KIB: u64 = 1024;
-const MIB: u64 = 1024 * KIB;
-const GIB: u64 = 1024 * MIB;
-const TIB: u64 = 1024 * GIB;
-
-fn format_size(size: u64) -> String {
-    if size >= 4 * TIB {
-        format!("{:.1} TiB", size as f64 / TIB as f64)
-    } else if size >= GIB {
-        format!("{:.1} GiB", size as f64 / GIB as f64)
-    } else if size >= MIB {
-        format!("{:.1} MiB", size as f64 / MIB as f64)
-    } else if size >= KIB {
-        format!("{:.1} KiB", size as f64 / KIB as f64)
-    } else {
-        format!("{} B", size)
-    }
-}
-
 fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> Result<()> {
     if let Some(parent) = dest.parent() {
         // Parent may be a symlink
@@ -220,7 +201,7 @@ fn choose_disk() -> PathBuf {
                 "\x1B[1m{}\x1B[0m: {}: {}",
                 i + 1,
                 path.display(),
-                format_size(*size)
+                redox_installer::format_bytes(*size)
             );
         }
 
@@ -361,7 +342,7 @@ fn main() {
             files.dedup();
 
             // Install files
-            let mut buf = vec![0; 4 * MIB as usize];
+            let mut buf = vec![0; 4096 * 1024];
             for (i, name) in files.iter().enumerate() {
                 eprintln!("copy {} [{}/{}]", name, i, files.len());
 

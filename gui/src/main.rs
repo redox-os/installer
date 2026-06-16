@@ -34,25 +34,6 @@ fn main() -> iced::Result {
     app::run::<Window>(settings, ())
 }
 
-const KIB: u64 = 1024;
-const MIB: u64 = 1024 * KIB;
-const GIB: u64 = 1024 * MIB;
-const TIB: u64 = 1024 * GIB;
-
-fn format_size(size: u64) -> String {
-    if size >= 4 * TIB {
-        format!("{:.1} TiB", size as f64 / TIB as f64)
-    } else if size >= GIB {
-        format!("{:.1} GiB", size as f64 / GIB as f64)
-    } else if size >= MIB {
-        format!("{:.1} MiB", size as f64 / MIB as f64)
-    } else if size >= KIB {
-        format!("{:.1} KiB", size as f64 / KIB as f64)
-    } else {
-        format!("{} B", size)
-    }
-}
-
 fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> anyhow::Result<()> {
     if let Some(parent) = dest.parent() {
         // Parent may be a symlink
@@ -325,7 +306,7 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
                 .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
 
             // Install files
-            let mut buf = vec![0; 4 * MIB as usize];
+            let mut buf = vec![0; 4096 * 1024];
             for (i, name) in files.iter().enumerate() {
                 progress = (i * 100) / files.len();
                 message!("Copy {} [{}/{}]", name, i, files.len());
@@ -577,7 +558,7 @@ impl Application for Window {
                                             Message::DiskChoose
                                         ),
                                         space::horizontal(),
-                                        text(format_size(*disk_size)),
+                                        text(redox_installer::format_bytes(*disk_size)),
                                     ]
                                     .into(),
                                 );
