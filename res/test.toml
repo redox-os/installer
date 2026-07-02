@@ -4,11 +4,9 @@ include = []
 
 [general]
 prompt = false
-filesystem_size = 256
+filesystem_size = 196
 
 [packages.base]
-
-[packages.base-initfs]
 
 [packages.bootloader]
 
@@ -17,8 +15,6 @@ filesystem_size = 256
 [packages.coreutils]
 
 [packages.extrautils]
-
-[packages.findutils]
 
 [packages.ion]
 
@@ -42,26 +38,51 @@ filesystem_size = 256
 
 [packages.uutils]
 
-[[files]]
-path = "/usr/lib/init.d/00_base"
-data = """
-# clear and recreate tmpdir with 0o1777 permission
-rm -rf /tmp
-mkdir -m a=rwxt /tmp
-
-ipcd
-ptyd
-nowait sudo --daemon
-"""
-symlink = false
-directory = false
-recursive_chown = false
-postinstall = false
+[packages.uutils-procps]
 
 [[files]]
-path = "/usr/lib/init.d/00_drivers"
+path = "/etc/login_schemes.toml"
 data = """
-pcid-spawner /etc/pcid.d/
+[user_schemes.root]
+schemes = ["*"]
+[user_schemes.user]
+schemes = [
+  # Kernel schemes
+  "debug",
+  "event",
+  "memory",
+  "pipe",
+  "serio",
+  "irq",
+  "time",
+  "sys",
+  # Base schemes
+  "rand",
+  "null",
+  "zero",
+  "log",
+  # Network schemes
+  "ip",
+  "icmp",
+  "tcp",
+  "udp",
+  # IPC schemes
+  "shm",
+  "chan",
+  "uds_stream",
+  "uds_dgram",
+  # File schemes
+  "file",
+  # Display schemes
+  "display.vesa",
+  "display*",
+  # Other schemes
+  "proc",
+  "pty",
+  "sudo",
+  "audio",
+  "orbital",
+]
 """
 symlink = false
 directory = false
@@ -71,6 +92,46 @@ postinstall = false
 [[files]]
 path = "/etc/hostname"
 data = "redox"
+symlink = false
+directory = false
+recursive_chown = false
+postinstall = false
+
+[[files]]
+path = "/etc/net/dns"
+data = """
+9.9.9.9
+"""
+symlink = false
+directory = false
+recursive_chown = false
+postinstall = false
+
+[[files]]
+path = "/etc/net/ip"
+data = """
+10.0.2.15
+"""
+symlink = false
+directory = false
+recursive_chown = false
+postinstall = false
+
+[[files]]
+path = "/etc/net/ip_router"
+data = """
+10.0.2.2
+"""
+symlink = false
+directory = false
+recursive_chown = false
+postinstall = false
+
+[[files]]
+path = "/etc/net/ip_subnet"
+data = """
+255.255.255.0
+"""
 symlink = false
 directory = false
 recursive_chown = false
@@ -197,8 +258,24 @@ recursive_chown = false
 postinstall = false
 
 [[files]]
-path = "/usr/share/fonts"
-data = "../../ui/fonts"
+path = "/ui"
+data = "usr/share/ui"
+symlink = true
+directory = false
+recursive_chown = false
+postinstall = false
+
+[[files]]
+path = "/usr/share/ui/fonts"
+data = "/usr/share/fonts"
+symlink = true
+directory = false
+recursive_chown = false
+postinstall = false
+
+[[files]]
+path = "/usr/share/ui/icons"
+data = "/usr/share/icons"
 symlink = true
 directory = false
 recursive_chown = false
@@ -268,126 +345,12 @@ recursive_chown = false
 postinstall = false
 
 [[files]]
-path = "/dev/null"
-data = "/scheme/null"
-symlink = true
-directory = false
-recursive_chown = false
-postinstall = false
-
-[[files]]
-path = "/dev/random"
-data = "/scheme/rand"
-symlink = true
-directory = false
-recursive_chown = false
-postinstall = false
-
-[[files]]
-path = "/dev/urandom"
-data = "/scheme/rand"
-symlink = true
-directory = false
-recursive_chown = false
-postinstall = false
-
-[[files]]
-path = "/dev/zero"
-data = "/scheme/zero"
-symlink = true
-directory = false
-recursive_chown = false
-postinstall = false
-
-[[files]]
-path = "/dev/tty"
-data = "libc:tty"
-symlink = true
-directory = false
-recursive_chown = false
-postinstall = false
-
-[[files]]
-path = "/dev/stdin"
-data = "libc:stdin"
-symlink = true
-directory = false
-recursive_chown = false
-postinstall = false
-
-[[files]]
-path = "/dev/stdout"
-data = "libc:stdout"
-symlink = true
-directory = false
-recursive_chown = false
-postinstall = false
-
-[[files]]
-path = "/dev/stderr"
-data = "libc:stderr"
-symlink = true
-directory = false
-recursive_chown = false
-postinstall = false
-
-[[files]]
-path = "/usr/lib/init.d/10_net"
-data = """
-smolnetd
-nowait dhcpd
-"""
-symlink = false
-directory = false
-recursive_chown = false
-postinstall = false
-
-[[files]]
-path = "/etc/net/dns"
-data = """
-9.9.9.9
-"""
-symlink = false
-directory = false
-recursive_chown = false
-postinstall = false
-
-[[files]]
-path = "/etc/net/ip"
-data = """
-10.0.2.15
-"""
-symlink = false
-directory = false
-recursive_chown = false
-postinstall = false
-
-[[files]]
-path = "/etc/net/ip_router"
-data = """
-10.0.2.2
-"""
-symlink = false
-directory = false
-recursive_chown = false
-postinstall = false
-
-[[files]]
-path = "/etc/net/ip_subnet"
-data = """
-255.255.255.0
-"""
-symlink = false
-directory = false
-recursive_chown = false
-postinstall = false
-
-[[files]]
 path = "/usr/lib/init.d/30_console"
 data = """
+requires_weak 10_net.target
 inputd -A 2
 nowait getty 2
-nowait getty /scheme/debug -J
+nowait getty /scheme/debug/no-preserve -J
 """
 symlink = false
 directory = false
@@ -398,8 +361,6 @@ postinstall = false
 password = "password"
 uid = 0
 gid = 0
-name = "root"
-home = "/root"
 shell = "/usr/bin/ion"
 
 [users.user]
