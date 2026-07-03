@@ -2,14 +2,15 @@ use anyhow::format_err;
 use cosmic::{
     app::{self, Task},
     iced::{
-        self, executor, futures::sink::SinkExt, stream, widget::row, window, Alignment, Size,
-        Subscription,
+        self, executor,
+        futures::sink::SinkExt,
+        widget::{row, text_input},
+        window, Alignment, Size, Subscription,
     },
-    widget::{
-        button, column, horizontal_space, progress_bar, radio, text, text_input, vertical_space,
-    },
+    widget::{button, column, progress_bar, radio, space, text},
     Application, ApplicationExt, Core, Element,
 };
+use futures_channel::mpsc;
 use pkgar::{ext::EntryExt, PackageHead};
 use pkgar_core::PackageSrc;
 use pkgar_keys::PublicKeyFile;
@@ -23,115 +24,14 @@ use std::{
     sync::Arc,
 };
 
+mod sys;
+pub use sys::*;
+
 fn main() -> iced::Result {
     let mut settings = app::Settings::default();
     settings = settings.size(Size::new(608.0, 416.0));
     settings = settings.exit_on_close(false);
     app::run::<Window>(settings, ())
-}
-
-fn sudo(password: &str) -> Result<(), String> {
-    let file = libredox::call::open("/scheme/sudo", libredox::flag::O_CLOEXEC, 0)
-        .map_err(|err| err.to_string())?;
-
-    libredox::call::write(file, password.as_bytes()).map_err(|err| err.to_string())?;
-
-    // FIXME move to libredox
-    unsafe extern "C" {
-        safe fn redox_cur_procfd_v0() -> usize;
-    }
-
-    // Elevate privileges of our own process with help from the sudo daemon
-    syscall::sendfd(
-        file,
-        syscall::dup(redox_cur_procfd_v0(), &[]).map_err(|err| err.to_string())?,
-        0,
-        0,
-    )
-    .map_err(|err| err.to_string())?;
-
-    Ok(())
-}
-
-fn disk_paths() -> Result<Vec<(String, u64)>, String> {
-    let mut schemes = Vec::new();
-    match fs::read_dir("/scheme/") {
-        Ok(entries) => {
-            for entry_res in entries {
-                if let Ok(entry) = entry_res {
-                    let path = entry.path();
-                    if let Ok(path_str) = path.into_os_string().into_string() {
-                        let scheme = path_str.trim_start_matches("/scheme/").trim_matches('/');
-                        if scheme.starts_with("disk") {
-                            if scheme == "disk/live" {
-                                // Skip live disks
-                                continue;
-                            }
-
-                            schemes.push(format!("/scheme/{}", scheme));
-                        }
-                    }
-                }
-            }
-        }
-        Err(err) => {
-            return Err(format!("failed to list schemes: {}", err));
-        }
-    }
-
-    let mut paths = Vec::new();
-    for scheme in schemes {
-        let is_dir = fs::metadata(&scheme).map(|x| x.is_dir()).unwrap_or(false);
-        if is_dir {
-            match fs::read_dir(&scheme) {
-                Ok(entries) => {
-                    for entry_res in entries {
-                        if let Ok(entry) = entry_res {
-                            if let Ok(file_name) = entry.file_name().into_string() {
-                                if file_name.contains('p') {
-                                    // Skip partitions
-                                    continue;
-                                }
-
-                                if let Ok(path) = entry.path().into_os_string().into_string() {
-                                    if let Ok(metadata) = entry.metadata() {
-                                        let size = metadata.len();
-                                        if size > 0 {
-                                            paths.push((path, size));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                Err(err) => {
-                    return Err(format!("failed to list '{}': {}", scheme, err));
-                }
-            }
-        }
-    }
-
-    Ok(paths)
-}
-
-const KIB: u64 = 1024;
-const MIB: u64 = 1024 * KIB;
-const GIB: u64 = 1024 * MIB;
-const TIB: u64 = 1024 * GIB;
-
-fn format_size(size: u64) -> String {
-    if size >= 4 * TIB {
-        format!("{:.1} TiB", size as f64 / TIB as f64)
-    } else if size >= GIB {
-        format!("{:.1} GiB", size as f64 / GIB as f64)
-    } else if size >= MIB {
-        format!("{:.1} MiB", size as f64 / MIB as f64)
-    } else if size >= KIB {
-        format!("{:.1} KiB", size as f64 / KIB as f64)
-    } else {
-        format!("{} B", size)
-    }
 }
 
 fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> anyhow::Result<()> {
@@ -406,7 +306,7 @@ fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, m
                 .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
 
             // Install files
-            let mut buf = vec![0; 4 * MIB as usize];
+            let mut buf = vec![0; 4096 * 1024];
             for (i, name) in files.iter().enumerate() {
                 progress = (i * 100) / files.len();
                 message!("Copy {} [{}/{}]", name, i, files.len());
@@ -467,10 +367,59 @@ enum Message {
 struct Window {
     core: Core,
     page: Page,
-    disk_paths: Vec<(String, u64)>,
+    disk_paths: Vec<(String, bool, u64)>,
     worker_opt: Option<Worker>,
 }
 
+enum State {
+    Ready,
+    Waiting(mpsc::UnboundedReceiver<Message>),
+    Finished,
+}
+
+impl Window {
+    fn worker_stream() -> impl iced::futures::Stream<Item = Message> {
+        iced::stream::channel(100, |mut output: mpsc::Sender<Message>| async move {
+            let mut state = State::Ready;
+            loop {
+                let (message, new_state) = match state {
+                    State::Ready => {
+                        let (command_sender, command_receiver) = std::sync::mpsc::channel();
+
+                        let (message_sender, message_receiver) = mpsc::unbounded();
+
+                        //TODO: kill worker thread?
+                        let join_handle = std::thread::spawn(move || {
+                            while let Ok((disk_path, password_opt)) = command_receiver.recv() {
+                                println!("Installing to {:?}", disk_path);
+                                install(disk_path, password_opt, |message| {
+                                    message_sender.unbounded_send(message).unwrap();
+                                });
+                            }
+                        });
+
+                        let worker = Worker {
+                            command_sender,
+                            join_handle: std::sync::Arc::new(join_handle),
+                        };
+
+                        (Message::Worker(worker), State::Waiting(message_receiver))
+                    }
+                    State::Waiting(mut message_receiver) => {
+                        use iced::futures::StreamExt;
+                        match message_receiver.next().await {
+                            Some(message) => (message, State::Waiting(message_receiver)),
+                            None => (Message::None, State::Finished),
+                        }
+                    }
+                    State::Finished => iced::futures::future::pending().await,
+                };
+                output.send(message).await.unwrap();
+                state = new_state;
+            }
+        })
+    }
+}
 impl Application for Window {
     type Executor = executor::Default;
     type Flags = ();
@@ -479,15 +428,10 @@ impl Application for Window {
     const APP_ID: &'static str = "org.redox-os.InstallerGui";
 
     fn init(core: Core, _flags: ()) -> (Self, Task<Message>) {
-        let uid = libredox::call::geteuid().unwrap();
-        let (page, disk_paths) = if uid == 0 {
-            //TODO: load in background
-            match disk_paths() {
-                Ok(disk_paths) => (Page::Disk(None), disk_paths),
-                Err(err) => (Page::Error(err), Vec::new()),
-            }
-        } else {
-            (Page::Sudo(String::new()), Vec::new())
+        //TODO: load in background
+        let (page, disk_paths) = match disk_paths() {
+            Ok(disk_paths) => (Page::Disk(None), disk_paths),
+            Err(err) => (Page::Error(err), Vec::new()),
         };
 
         let mut app = Self {
@@ -518,20 +462,26 @@ impl Application for Window {
                 self.page = Page::Sudo(password);
             }
             Message::SudoSubmit => {
+                #[cfg(target_os = "redox")]
                 if let Page::Sudo(password) = &self.page {
-                    //TODO: run async?
-                    match sudo(password) {
+                    match ask_root(&password) {
                         Ok(()) => {
-                            (self.page, self.disk_paths) = match disk_paths() {
-                                Ok(disk_paths) => (Page::Disk(None), disk_paths),
-                                Err(err) => (Page::Error(err), Vec::new()),
-                            };
+                            self.page = Page::Disk(None);
                         }
                         Err(err) => {
-                            //TODO: show error in GUI
                             eprintln!("{err}");
-                            self.page = Page::Sudo(String::new());
                         }
+                    }
+                }
+                #[cfg(target_os = "linux")]
+                match ask_root() {
+                    Ok(()) => {
+                        if let Some(window_id) = self.core.main_window_id() {
+                            return window::close(window_id);
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("{err}");
                     }
                 }
             }
@@ -539,7 +489,7 @@ impl Application for Window {
                 self.page = Page::Disk(Some(disk_i));
             }
             Message::DiskConfirm(disk_i) => match self.disk_paths.get(disk_i) {
-                Some((disk_path, _disk_size)) => match &self.worker_opt {
+                Some((disk_path, _is_partition, _disk_size)) => match &self.worker_opt {
                     Some(worker) => match worker.command_sender.send((disk_path.clone(), None)) {
                         Ok(()) => self.page = Page::Install(0, format!("Starting install...")),
                         Err(err) => {
@@ -584,34 +534,61 @@ impl Application for Window {
                 widgets.push(text("Enter your password:").into());
                 widgets.push(
                     text_input("", password)
-                        .password()
                         .on_input(Message::SudoInput)
-                        .on_submit(|_| Message::SudoSubmit)
+                        .secure(true)
+                        .on_submit(Message::SudoSubmit)
                         .into(),
                 );
             }
             Page::Disk(disk_i_opt) => {
                 if !self.disk_paths.is_empty() {
-                    widgets.push(text("Choose a drive:").size(24).into());
+                    if is_root() {
+                        widgets.push(text("Choose a drive:").size(24).into());
 
-                    for (disk_i, (disk_path, disk_size)) in self.disk_paths.iter().enumerate() {
+                        for (disk_i, (disk_path, is_partition, disk_size)) in
+                            self.disk_paths.iter().enumerate()
+                        {
+                            if !is_partition {
+                                widgets.push(
+                                    row![
+                                        radio(
+                                            text(disk_path),
+                                            disk_i,
+                                            *disk_i_opt,
+                                            Message::DiskChoose
+                                        ),
+                                        space::horizontal(),
+                                        text(redox_installer::format_bytes(*disk_size)),
+                                    ]
+                                    .into(),
+                                );
+                            }
+                        }
+
+                        if let Some(disk_i) = *disk_i_opt {
+                            widgets.push(space::vertical().into());
+                            widgets.push(
+                                row![
+                                    space::horizontal(),
+                                    button::destructive("Confirm")
+                                        .on_press(Message::DiskConfirm(disk_i)),
+                                ]
+                                .into(),
+                            );
+                        }
+                    } else {
+                        #[cfg(target_os = "linux")]
+                        let page = Message::SudoSubmit;
+
+                        #[cfg(target_os = "redox")]
+                        let page = Message::SudoInput(String::new());
+
+                        widgets.push(space::vertical().into());
                         widgets.push(
                             row![
-                                radio(text(disk_path), disk_i, *disk_i_opt, Message::DiskChoose),
-                                horizontal_space(),
-                                text(format_size(*disk_size)),
-                            ]
-                            .into(),
-                        );
-                    }
-
-                    if let Some(disk_i) = *disk_i_opt {
-                        widgets.push(vertical_space().into());
-                        widgets.push(
-                            row![
-                                horizontal_space(),
-                                button::destructive("Confirm")
-                                    .on_press(Message::DiskConfirm(disk_i)),
+                                text("Ask superuser permission to install into drives"),
+                                space::horizontal(),
+                                button::suggested("Ask root access").on_press(page),
                             ]
                             .into(),
                         );
@@ -624,16 +601,16 @@ impl Application for Window {
             }
             Page::Install(progress, description) => {
                 widgets.push(text("Installation progress:").size(24).into());
-                widgets.push(progress_bar(0.0..=100.0, *progress as f32).into());
+                widgets.push(progress_bar::determinate_linear(*progress as f32 / 100.).into());
                 widgets.push(text(description).into());
             }
             Page::Success(description) => {
                 widgets.push(text("Installation complete!").size(24).into());
                 widgets.push(text(description).into());
-                widgets.push(vertical_space().into());
+                widgets.push(space::vertical().into());
                 widgets.push(
                     row![
-                        horizontal_space(),
+                        space::horizontal(),
                         button::standard("Exit").on_press(Message::Exit),
                     ]
                     .into(),
@@ -652,54 +629,6 @@ impl Application for Window {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        enum State {
-            Ready,
-            Waiting(iced::futures::channel::mpsc::UnboundedReceiver<Message>),
-            Finished,
-        }
-
-        Subscription::run_with_id(
-            std::any::TypeId::of::<Worker>(),
-            stream::channel(100, |mut output| async move {
-                let mut state = State::Ready;
-                loop {
-                    let (message, new_state) = match state {
-                        State::Ready => {
-                            let (command_sender, command_receiver) = std::sync::mpsc::channel();
-
-                            let (message_sender, message_receiver) =
-                                iced::futures::channel::mpsc::unbounded();
-
-                            //TODO: kill worker thread?
-                            let join_handle = std::thread::spawn(move || {
-                                while let Ok((disk_path, password_opt)) = command_receiver.recv() {
-                                    println!("Installing to {:?}", disk_path);
-                                    install(disk_path, password_opt, |message| {
-                                        message_sender.unbounded_send(message).unwrap();
-                                    });
-                                }
-                            });
-
-                            let worker = Worker {
-                                command_sender,
-                                join_handle: Arc::new(join_handle),
-                            };
-
-                            (Message::Worker(worker), State::Waiting(message_receiver))
-                        }
-                        State::Waiting(mut message_receiver) => {
-                            use iced::futures::StreamExt;
-                            match message_receiver.next().await {
-                                Some(message) => (message, State::Waiting(message_receiver)),
-                                None => (Message::None, State::Finished),
-                            }
-                        }
-                        State::Finished => iced::futures::future::pending().await,
-                    };
-                    output.send(message).await.unwrap();
-                    state = new_state;
-                }
-            }),
-        )
+        Subscription::run(Self::worker_stream)
     }
 }

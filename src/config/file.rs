@@ -66,11 +66,7 @@ impl Display for FileConfig {
                 write!(f, " chown=yes")?;
             }
         } else {
-            write!(
-                f,
-                " size={}B",
-                arg_parser::to_human_readable_string(self.data.len() as u64)
-            )?;
+            write!(f, " size={}", crate::format_bytes(self.data.len() as u64))?;
             if self.postinstall {
                 write!(f, "!")?;
             }
