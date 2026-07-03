@@ -75,7 +75,7 @@ pub fn disk_paths() -> Result<Vec<(String, bool, u64)>, String> {
                     let Ok(metadata) = entry.metadata() else {
                         continue;
                     };
-                    let is_partition = file_name.contains(p);
+                    let is_partition = file_name.contains('p');
                     let size = metadata.len();
                     if size == 0 {
                         continue;
