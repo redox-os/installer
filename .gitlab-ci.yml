@@ -1,4 +1,3 @@
-image: "rust:latest"
 
 stages:
   - lint
@@ -10,15 +9,26 @@ workflow:
     - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
 
 fmt:
+  image: "rust:latest"
   stage: lint
   script:
     - rustup component add rustfmt
     - cargo fmt -- --check
+    - cd gui && cargo fmt -- --check
 
 cargo-test:
+  image: "rust:latest"
   stage: test
   script:
     - apt update && apt install -y fuse3 libfuse3-dev
     - cargo build --locked
     - cargo test
     - ./target/debug/redox_installer -c res/test.toml test.bin --no-mount
+
+gui-build:
+  stage: test
+  script:
+    - apt update && apt install -y fuse3 libfuse3-dev
+    - cd gui
+    - redoxer build
+    - cargo build
