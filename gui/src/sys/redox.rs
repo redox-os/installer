@@ -1,10 +1,11 @@
 use std::fs;
 
 pub fn ask_root(password: &str) -> Result<(), String> {
-    let file = libredox::call::open("/scheme/sudo", libredox::flag::O_CLOEXEC, 0)
+    let file = libredox::Fd::open("/scheme/sudo", libredox::flag::O_CLOEXEC, 0)
         .map_err(|err| err.to_string())?;
 
-    libredox::call::write(file, password.as_bytes()).map_err(|err| err.to_string())?;
+    file.write(password.as_bytes())
+        .map_err(|err| err.to_string())?;
 
     // FIXME move to libredox
     unsafe extern "C" {
@@ -12,11 +13,12 @@ pub fn ask_root(password: &str) -> Result<(), String> {
     }
 
     // Elevate privileges of our own process with help from the sudo daemon
-    syscall::sendfd(
-        file,
-        syscall::dup(redox_cur_procfd_v0(), &[]).map_err(|err| err.to_string())?,
-        0,
-        0,
+    file.call_wo(
+        &libredox::call::dup(redox_cur_procfd_v0(), &[])
+            .map_err(|err| err.to_string())?
+            .to_ne_bytes(),
+        syscall::CallFlags::FD,
+        &[],
     )
     .map_err(|err| err.to_string())?;
 

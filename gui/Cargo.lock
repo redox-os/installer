@@ -2929,14 +2929,14 @@ checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
 
 [[package]]
 name = "libredox"
-version = "0.1.16"
+version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e02f3bb43d335493c96bf3fd3a321600bf6bd07ed34bc64118e9293bdffea46c"
+checksum = "c943259e342f1e06ff2da7a83eabdfe7f92ce10262688dbf1895ff0b3e6e4652"
 dependencies = [
  "bitflags 2.13.0",
  "libc",
  "plain",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.9.0",
 ]
 
 [[package]]
@@ -4199,12 +4199,12 @@ dependencies = [
 
 [[package]]
 name = "redox-scheme"
-version = "0.9.1"
+version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ef5279a1ad9567f8a87818ba80320afdf858853db93742c2bb32be31a82ccdb"
+checksum = "5928b2f572e06a74e9c210fcacf15b70b8ffa6fdb3d8650f4601b83c12fe194b"
 dependencies = [
  "libredox",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.9.0",
 ]
 
 [[package]]
@@ -4233,7 +4233,7 @@ dependencies = [
  "pkgar-keys",
  "rand 0.9.4",
  "redox-pkg",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.9.0",
  "redoxfs",
  "ring",
  "rust-argon2",
@@ -4257,7 +4257,7 @@ dependencies = [
  "pkgar-core",
  "pkgar-keys",
  "redox_installer",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.9.0",
  "toml 0.8.23",
 ]
 
@@ -4272,9 +4272,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.7.5"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4666a1a60d8412eab19d94f6d13dcc9cea0a5ef4fdf6a5db306537413c661b1b"
+checksum = "c5102a6aaa05aa011a238e178e6bca86d2cb56fc9f586d37cb80f5bca6e07759"
 dependencies = [
  "bitflags 2.13.0",
 ]
@@ -4292,9 +4292,9 @@ dependencies = [
 
 [[package]]
 name = "redoxfs"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f790d2ee811995ee2ba5dd7693fae50a222fa2ca529bfd3e23734ddc10f0a065"
+checksum = "a66d0c043a5768739851a7e5775192a70fdffdbf3418c22fd7927415d41a87c3"
 dependencies = [
  "aes",
  "argon2",
@@ -4313,7 +4313,7 @@ dependencies = [
  "range-tree",
  "redox-path",
  "redox-scheme",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.9.0",
  "seahash",
  "termion",
  "uuid",
