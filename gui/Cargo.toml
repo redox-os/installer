@@ -9,7 +9,7 @@ pkgar = "0.2"
 pkgar-core = "0.2"
 pkgar-keys = "0.2"
 redox_installer = { path = ".." }
-redox_syscall = "0.7"
+redox_syscall = "0.9"
 toml = "0.8"
 # TODO: remove after pkgutils update
 futures-channel = "0.3.32"
