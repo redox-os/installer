@@ -4,17 +4,33 @@ include = []
 
 [general]
 prompt = false
-filesystem_size = 196
+filesystem_size = 512
 
 [packages.base]
 
+[packages.bash]
+
 [packages.bootloader]
+
+[packages.bottom]
 
 [packages.ca-certificates]
 
 [packages.coreutils]
 
+[packages.curl]
+
+[packages.diffutils]
+
 [packages.extrautils]
+
+[packages.findutils]
+
+[packages.gettext]
+
+[packages.git]
+
+[packages.installer]
 
 [packages.ion]
 
@@ -31,6 +47,8 @@ filesystem_size = 196
 [packages.netutils]
 
 [packages.pkgutils]
+
+[packages.redoxfs]
 
 [packages.relibc]
 
@@ -52,8 +70,6 @@ schemes = [
   "event",
   "memory",
   "pipe",
-  "serio",
-  "irq",
   "time",
   "sys",
   # Base schemes
@@ -74,7 +90,6 @@ schemes = [
   # File schemes
   "file",
   # Display schemes
-  "display.vesa",
   "display*",
   # Other schemes
   "proc",

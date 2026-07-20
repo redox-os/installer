@@ -7,7 +7,7 @@ use cosmic::{
         widget::{row, text_input},
         window, Alignment, Size, Subscription,
     },
-    widget::{button, column, progress_bar, radio, space, text},
+    widget::{button, checkbox, column, progress_bar, radio, space, text},
     Application, ApplicationExt, Core, Element,
 };
 use futures_channel::mpsc;
@@ -25,320 +25,56 @@ use std::{
 };
 
 mod sys;
+mod worker;
 pub use sys::*;
+pub use worker::*;
 
 fn main() -> iced::Result {
     let mut settings = app::Settings::default();
-    settings = settings.size(Size::new(608.0, 416.0));
+    settings = settings.size(Size::new(700.0, 500.0));
     settings = settings.exit_on_close(false);
     app::run::<Window>(settings, ())
 }
-
-fn copy_file(src: &Path, dest: &Path, buf: &mut [u8]) -> anyhow::Result<()> {
-    if let Some(parent) = dest.parent() {
-        // Parent may be a symlink
-        if !parent.is_symlink() {
-            match fs::create_dir_all(&parent) {
-                Ok(()) => (),
-                Err(err) => {
-                    return Err(format_err!(
-                        "failed to create directory {}: {}",
-                        parent.display(),
-                        err
-                    ));
-                }
-            }
-        }
-    }
-
-    let metadata = match fs::symlink_metadata(&src) {
-        Ok(ok) => ok,
-        Err(err) => {
-            return Err(format_err!(
-                "failed to read metadata of {}: {}",
-                src.display(),
-                err
-            ));
-        }
-    };
-
-    if metadata.file_type().is_symlink() {
-        let real_src = match fs::read_link(&src) {
-            Ok(ok) => ok,
-            Err(err) => {
-                return Err(format_err!(
-                    "failed to read link {}: {}",
-                    src.display(),
-                    err
-                ));
-            }
-        };
-
-        match symlink(&real_src, &dest) {
-            Ok(()) => (),
-            Err(err) => {
-                return Err(format_err!(
-                    "failed to copy link {} ({}) to {}: {}",
-                    src.display(),
-                    real_src.display(),
-                    dest.display(),
-                    err
-                ));
-            }
-        }
-    } else {
-        let mut src_file = match fs::File::open(&src) {
-            Ok(ok) => ok,
-            Err(err) => {
-                return Err(format_err!(
-                    "failed to open file {}: {}",
-                    src.display(),
-                    err
-                ));
-            }
-        };
-
-        let mut dest_file = match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(metadata.mode())
-            .open(&dest)
-        {
-            Ok(ok) => ok,
-            Err(err) => {
-                return Err(format_err!(
-                    "failed to create file {}: {}",
-                    dest.display(),
-                    err
-                ));
-            }
-        };
-
-        loop {
-            let count = match src_file.read(buf) {
-                Ok(ok) => ok,
-                Err(err) => {
-                    return Err(format_err!(
-                        "failed to read file {}: {}",
-                        src.display(),
-                        err
-                    ));
-                }
-            };
-
-            if count == 0 {
-                break;
-            }
-
-            match dest_file.write_all(&buf[..count]) {
-                Ok(()) => (),
-                Err(err) => {
-                    return Err(format_err!(
-                        "failed to write file {}: {}",
-                        dest.display(),
-                        err
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok(())
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetKind {
+    Drive,
+    Partition,
+    Image,
 }
 
-fn package_files(
-    root_path: &Path,
-    config: &mut Config,
-    files: &mut Vec<String>,
-) -> Result<(), anyhow::Error> {
-    //TODO: Remove packages from config where all files are located (and have valid shasum?)
-    config.packages.clear();
-
-    let pkey_path = "pkg/id_ed25519.pub.toml";
-    let pkey = PublicKeyFile::open(&root_path.join(pkey_path))?.pkey;
-    files.push(pkey_path.to_string());
-
-    for item_res in fs::read_dir(&root_path.join("pkg"))? {
-        let item = item_res?;
-        let pkg_path = item.path();
-        if pkg_path.extension() == Some(OsStr::new("pkgar_head")) {
-            let mut pkg = PackageHead::new(&pkg_path, &root_path, &pkey)?;
-            for entry in pkg.read_entries()? {
-                files.push(entry.check_path()?.to_str().unwrap().to_string());
-            }
-            files.push(
-                pkg_path
-                    .strip_prefix(root_path)
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .to_string(),
-            );
-        }
-    }
-
-    Ok(())
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct InstallConfig {
+    kind: InstallConfigKind,
+    live_disk: bool,
+    password_opt: Option<String>,
 }
 
-fn install<F: FnMut(Message)>(disk_path: String, password_opt: Option<String>, mut f: F) {
-    let start = std::time::Instant::now();
-
-    let mut progress = 0;
-
-    macro_rules! message {
-        ($($arg:tt)*) => {{
-            eprintln!($($arg)*);
-            f(Message::Install(
-                progress,
-                format!($($arg)*)
-            ));
-        }}
-    }
-
-    let root_path = Path::new("/scheme/file/");
-
-    message!("Loading bootloader");
-    let bootloader_bios = {
-        let path = root_path.join("boot").join("bootloader.bios");
-        if path.exists() {
-            match fs::read(&path) {
-                Ok(ok) => ok,
-                Err(err) => {
-                    f(Message::Error(format!(
-                        "{}: failed to read: {}",
-                        path.display(),
-                        err
-                    )));
-                    return;
-                }
-            }
-        } else {
-            Vec::new()
-        }
-    };
-
-    message!("Loading bootloader.efi");
-    let bootloader_efi = {
-        let path = root_path.join("boot").join("bootloader.efi");
-        if path.exists() {
-            match fs::read(&path) {
-                Ok(ok) => ok,
-                Err(err) => {
-                    f(Message::Error(format!(
-                        "{}: failed to read: {}",
-                        path.display(),
-                        err
-                    )));
-                    return;
-                }
-            }
-        } else {
-            Vec::new()
-        }
-    };
-
-    message!("Formatting disk");
-    let disk_option = DiskOption {
-        bootloader_bios: &bootloader_bios,
-        bootloader_efi: &bootloader_efi,
-        password_opt: password_opt.as_ref().map(|x| x.as_bytes()),
-        efi_partition_size: None,
-        skip_partitions: false,
-    };
-    let res = with_whole_disk(&disk_path, &disk_option, |mut fs| -> anyhow::Result<()> {
-        // Fast install method via filesystem clone
-        let mut last_progress = 0;
-        if try_fast_install(&mut fs, |used, used_old| {
-            progress = ((used * 100) / used_old) as usize;
-            if progress != last_progress {
-                message!(
-                    "{}%: {} MB/{} MB",
-                    progress,
-                    used / 1000 / 1000,
-                    used_old / 1000 / 1000
-                );
-                last_progress = progress;
-            }
-        })? {
-            progress = 100;
-            message!("Finished installing using fast mode");
-            return Ok(());
-        }
-
-        with_redoxfs_mount(fs, None, |mount_path: &Path| -> anyhow::Result<()> {
-            message!("Loading filesystem.toml");
-            let mut config: Config = {
-                let path = root_path.join("filesystem.toml");
-                match fs::read_to_string(&path) {
-                    Ok(config_data) => match toml::from_str(&config_data) {
-                        Ok(config) => config,
-                        Err(err) => {
-                            return Err(format_err!(
-                                "{}: failed to decode: {}",
-                                path.display(),
-                                err
-                            ));
-                        }
-                    },
-                    Err(err) => {
-                        return Err(format_err!("{}: failed to read: {}", path.display(), err));
-                    }
-                }
-            };
-
-            // Copy filesystem.toml, which is not packaged
-            let mut files = vec!["filesystem.toml".to_string()];
-
-            // Copy files from locally installed packages
-            message!("Loading package files");
-            if let Err(err) = package_files(&root_path, &mut config, &mut files) {
-                return Err(format_err!("failed to read package files: {}", err));
-            }
-
-            // Sort and remove duplicates
-            files.sort();
-            files.dedup();
-
-            // Perform config install (after packages have been converted to files)
-            message!("Configuring system");
-            let cookbook: Option<&'static str> = None;
-            redox_installer::install_dir(config, mount_path, cookbook)
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
-
-            // Install files
-            let mut buf = vec![0; 4096 * 1024];
-            for (i, name) in files.iter().enumerate() {
-                progress = (i * 100) / files.len();
-                message!("Copy {} [{}/{}]", name, i, files.len());
-
-                let src = root_path.join(name);
-                let dest = mount_path.join(name);
-                copy_file(&src, &dest, &mut buf)?;
-            }
-
-            progress = 100;
-            message!("Finished installing, unmounting filesystem");
-            Ok(())
-        })
-    });
-
-    match res {
-        Ok(()) => {
-            f(Message::Success(format!(
-                "Finished installing in {:?}, ready to reboot",
-                start.elapsed()
-            )));
-        }
-        Err(err) => {
-            f(Message::Error(format!("Failed to install: {}", err)));
-        }
-    }
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallConfigKind {
+    #[default]
+    Desktop,
+    Server,
+    #[cfg(target_os = "redox")]
+    Clone,
 }
 
 #[derive(Debug)]
 enum Page {
+    Begin(Option<TargetKind>),
+    DrivePart {
+        kind: TargetKind,
+        selected_disk_i: Option<usize>,
+    },
+    ImageConfig {
+        path: String,
+        size: String,
+        skip_partition: bool,
+    },
+    Profile {
+        target: TargetConfig,
+        selected: InstallConfig,
+    },
     Sudo(String),
-    Disk(Option<usize>),
     Install(usize, String),
     Success(String),
     Error(String),
@@ -346,7 +82,7 @@ enum Page {
 
 #[derive(Clone, Debug)]
 struct Worker {
-    command_sender: std::sync::mpsc::Sender<(String, Option<String>)>,
+    command_sender: std::sync::mpsc::Sender<(TargetConfig, InstallConfig)>,
     join_handle: Arc<std::thread::JoinHandle<()>>,
 }
 
@@ -356,8 +92,23 @@ enum Message {
     Worker(Worker),
     SudoInput(String),
     SudoSubmit,
-    DiskChoose(usize),
-    DiskConfirm(usize),
+
+    BeginChoose(TargetKind),
+    BeginConfirm,
+    DrivePartChoose(usize),
+    DrivePartConfirm,
+    ImagePathInput(String),
+    ImageSizeInput(String),
+    ImageBrowse,
+    ImageBrowseResult(Option<String>),
+    ImageConfirm,
+    ProfileChoose(InstallConfigKind),
+    ProfileChooseLive(bool),
+    ProfileChoosePassword(bool),
+    ProfileEnterPassword(String),
+    ProfileConfirm,
+    GoBack,
+
     Install(usize, String),
     Success(String),
     Exit,
@@ -385,14 +136,11 @@ impl Window {
                 let (message, new_state) = match state {
                     State::Ready => {
                         let (command_sender, command_receiver) = std::sync::mpsc::channel();
-
                         let (message_sender, message_receiver) = mpsc::unbounded();
 
-                        //TODO: kill worker thread?
                         let join_handle = std::thread::spawn(move || {
-                            while let Ok((disk_path, password_opt)) = command_receiver.recv() {
-                                println!("Installing to {:?}", disk_path);
-                                install(disk_path, password_opt, |message| {
+                            while let Ok((target, profile)) = command_receiver.recv() {
+                                install(target, profile, |message| {
                                     message_sender.unbounded_send(message).unwrap();
                                 });
                             }
@@ -420,6 +168,7 @@ impl Window {
         })
     }
 }
+
 impl Application for Window {
     type Executor = executor::Default;
     type Flags = ();
@@ -428,9 +177,8 @@ impl Application for Window {
     const APP_ID: &'static str = "org.redox-os.InstallerGui";
 
     fn init(core: Core, _flags: ()) -> (Self, Task<Message>) {
-        //TODO: load in background
         let (page, disk_paths) = match disk_paths() {
-            Ok(disk_paths) => (Page::Disk(None), disk_paths),
+            Ok(disk_paths) => (Page::Begin(None), disk_paths),
             Err(err) => (Page::Error(err), Vec::new()),
         };
 
@@ -452,12 +200,210 @@ impl Application for Window {
         &mut self.core
     }
 
+    fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
+        let mut elements = Vec::new();
+
+        let can_go_back = matches!(
+            self.page,
+            Page::DrivePart { .. } | Page::ImageConfig { .. } | Page::Profile { .. }
+        );
+
+        if can_go_back {
+            elements.push(
+                cosmic::widget::button::standard("Back")
+                    .on_press(Message::GoBack)
+                    .into(),
+            );
+        }
+
+        elements.push(
+            cosmic::widget::header_bar()
+                .title("Redox OS Installer")
+                .into(),
+        );
+
+        elements
+    }
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::None => {}
             Message::Worker(worker) => {
                 self.worker_opt = Some(worker);
             }
+
+            Message::BeginChoose(kind) => {
+                self.page = Page::Begin(Some(kind));
+            }
+            Message::BeginConfirm => {
+                if let Page::Begin(Some(kind)) = self.page {
+                    self.page = match kind {
+                        TargetKind::Drive | TargetKind::Partition => Page::DrivePart {
+                            kind,
+                            selected_disk_i: None,
+                        },
+                        TargetKind::Image => Page::ImageConfig {
+                            path: String::new(),
+                            size: "1024".to_string(),
+                            skip_partition: false,
+                        },
+                    };
+                }
+            }
+            Message::DrivePartChoose(disk_i) => {
+                if let Page::DrivePart { kind, .. } = self.page {
+                    self.page = Page::DrivePart {
+                        kind,
+                        selected_disk_i: Some(disk_i),
+                    };
+                }
+            }
+            Message::DrivePartConfirm => {
+                if let Page::DrivePart {
+                    selected_disk_i: Some(i),
+                    ..
+                } = self.page
+                {
+                    if let Some((disk_path, _, disk_size)) = self.disk_paths.get(i) {
+                        self.page = Page::Profile {
+                            target: TargetConfig::Disk((disk_path.clone(), *disk_size)),
+                            selected: InstallConfig::default(),
+                        };
+                    }
+                }
+            }
+            Message::ImagePathInput(val) => {
+                if let Page::ImageConfig { ref mut path, .. } = self.page {
+                    *path = val;
+                }
+            }
+            Message::ImageSizeInput(val) => {
+                if let Page::ImageConfig { ref mut size, .. } = self.page {
+                    *size = val;
+                }
+            }
+            Message::ImageBrowse => {
+                #[cfg(target_os = "linux")]
+                return Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Save Image File")
+                            .save_file()
+                            .await
+                            .map(|f| f.path().to_str().unwrap().to_string())
+                    },
+                    |result| Message::ImageBrowseResult(result).into(),
+                );
+                #[cfg(not(target_os = "linux"))]
+                unreachable!()
+            }
+            Message::ImageBrowseResult(Some(new_path)) => {
+                if let Page::ImageConfig { ref mut path, .. } = self.page {
+                    *path = new_path;
+                }
+            }
+            Message::ImageBrowseResult(None) => {}
+            Message::ImageConfirm => {
+                if let Page::ImageConfig {
+                    path,
+                    size,
+                    skip_partition,
+                } = &self.page
+                {
+                    match size.parse::<u64>() {
+                        Ok(size_mb) if !path.is_empty() => {
+                            self.page = Page::Profile {
+                                target: TargetConfig::Image {
+                                    path: path.clone(),
+                                    size_mb,
+                                    skip_partition: *skip_partition,
+                                },
+                                selected: InstallConfig::default(),
+                            };
+                        }
+                        _ => {
+                            // TODO: validation error
+                        }
+                    }
+                }
+            }
+            Message::ProfileChoose(profile) => {
+                if let Page::Profile { selected, .. } = &mut self.page {
+                    selected.kind = profile;
+                }
+            }
+            Message::ProfileChooseLive(live_disk) => {
+                if let Page::Profile { selected, .. } = &mut self.page {
+                    selected.live_disk = live_disk;
+                }
+            }
+            Message::ProfileChoosePassword(password) => {
+                if let Page::Profile { selected, .. } = &mut self.page {
+                    selected.password_opt = if password { Some("".to_string()) } else { None };
+                }
+            }
+            Message::ProfileEnterPassword(password) => {
+                if let Page::Profile { selected, .. } = &mut self.page {
+                    selected.password_opt = Some(password);
+                }
+            }
+            Message::ProfileConfirm => {
+                if let Page::Profile {
+                    target,
+                    selected: profile,
+                } = &self.page
+                {
+                    if let Some(worker) = &self.worker_opt {
+                        match worker
+                            .command_sender
+                            .send((target.clone(), profile.clone()))
+                        {
+                            Ok(()) => self.page = Page::Install(0, format!("Starting install...")),
+                            Err(err) => {
+                                self.page = Page::Error(format!("failed to send command: {}", err));
+                            }
+                        }
+                    }
+                }
+            }
+            Message::GoBack => match &self.page {
+                Page::DrivePart { kind, .. } => {
+                    self.page = Page::Begin(Some(*kind));
+                }
+                Page::ImageConfig { .. } => {
+                    self.page = Page::Begin(Some(TargetKind::Image));
+                }
+                Page::Profile { target, .. } => {
+                    self.page = match target {
+                        TargetConfig::Disk((disk_path, _)) => {
+                            let selected_disk_i =
+                                self.disk_paths.iter().position(|(p, _, _)| p == disk_path);
+                            Page::DrivePart {
+                                kind: TargetKind::Drive,
+                                selected_disk_i,
+                            }
+                        }
+                        TargetConfig::Partition((disk_path, _)) => {
+                            let selected_disk_i =
+                                self.disk_paths.iter().position(|(p, _, _)| p == disk_path);
+                            Page::DrivePart {
+                                kind: TargetKind::Partition,
+                                selected_disk_i,
+                            }
+                        }
+                        TargetConfig::Image {
+                            path,
+                            size_mb,
+                            skip_partition,
+                        } => Page::ImageConfig {
+                            path: path.clone(),
+                            size: size_mb.to_string(),
+                            skip_partition: *skip_partition,
+                        },
+                    };
+                }
+                _ => unreachable!(),
+            },
+
             Message::SudoInput(password) => {
                 self.page = Page::Sudo(password);
             }
@@ -465,12 +411,8 @@ impl Application for Window {
                 #[cfg(target_os = "redox")]
                 if let Page::Sudo(password) = &self.page {
                     match ask_root(&password) {
-                        Ok(()) => {
-                            self.page = Page::Disk(None);
-                        }
-                        Err(err) => {
-                            eprintln!("{err}");
-                        }
+                        Ok(()) => self.page = Page::Begin(None),
+                        Err(err) => eprintln!("{err}"),
                     }
                 }
                 #[cfg(target_os = "linux")]
@@ -480,30 +422,9 @@ impl Application for Window {
                             return window::close(window_id);
                         }
                     }
-                    Err(err) => {
-                        eprintln!("{err}");
-                    }
+                    Err(err) => eprintln!("{err}"),
                 }
             }
-            Message::DiskChoose(disk_i) => {
-                self.page = Page::Disk(Some(disk_i));
-            }
-            Message::DiskConfirm(disk_i) => match self.disk_paths.get(disk_i) {
-                Some((disk_path, _is_partition, _disk_size)) => match &self.worker_opt {
-                    Some(worker) => match worker.command_sender.send((disk_path.clone(), None)) {
-                        Ok(()) => self.page = Page::Install(0, format!("Starting install...")),
-                        Err(err) => {
-                            self.page = Page::Error(format!("failed to send command: {}", err));
-                        }
-                    },
-                    None => {
-                        self.page = Page::Error(format!("command sender not found"));
-                    }
-                },
-                None => {
-                    self.page = Page::Error(format!("invalid disk number {} chosen", disk_i));
-                }
-            },
             Message::Install(progress, description) => {
                 self.page = Page::Install(progress, description);
             }
@@ -530,6 +451,216 @@ impl Application for Window {
     fn view(&self) -> Element<'_, Message> {
         let mut widgets = Vec::new();
         match &self.page {
+            Page::Begin(target_opt) => {
+                widgets.push(
+                    text("Where do you want to install Redox OS?")
+                        .size(24)
+                        .into(),
+                );
+                widgets.push(
+                    radio(
+                        "Whole Drive",
+                        TargetKind::Drive,
+                        *target_opt,
+                        Message::BeginChoose,
+                    )
+                    .into(),
+                );
+                widgets.push(
+                    radio(
+                        "Specific Partition",
+                        TargetKind::Partition,
+                        *target_opt,
+                        Message::BeginChoose,
+                    )
+                    .into(),
+                );
+                widgets.push(
+                    radio(
+                        "Image File",
+                        TargetKind::Image,
+                        *target_opt,
+                        Message::BeginChoose,
+                    )
+                    .into(),
+                );
+
+                if target_opt.is_some() {
+                    widgets.push(space::vertical().into());
+                    widgets.push(
+                        button::suggested("Next")
+                            .on_press(Message::BeginConfirm)
+                            .into(),
+                    );
+                }
+            }
+            Page::DrivePart {
+                kind,
+                selected_disk_i,
+            } => {
+                let is_part = *kind == TargetKind::Partition;
+                widgets.push(
+                    text(if is_part {
+                        "Choose a partition:"
+                    } else {
+                        "Choose a drive:"
+                    })
+                    .size(24)
+                    .into(),
+                );
+
+                if !self.disk_paths.is_empty() {
+                    for (disk_i, (disk_path, is_partition, disk_size)) in
+                        self.disk_paths.iter().enumerate()
+                    {
+                        if *is_partition == is_part {
+                            widgets.push(
+                                row![
+                                    radio(
+                                        text(disk_path),
+                                        disk_i,
+                                        *selected_disk_i,
+                                        Message::DrivePartChoose
+                                    ),
+                                    space::horizontal(),
+                                    text(redox_installer::format_bytes(*disk_size)),
+                                ]
+                                .into(),
+                            );
+                        }
+                    }
+
+                    if selected_disk_i.is_some() && is_root() {
+                        widgets.push(space::vertical().into());
+                        widgets.push(
+                            row![
+                                space::horizontal(),
+                                button::suggested("Next").on_press(Message::DrivePartConfirm),
+                            ]
+                            .into(),
+                        );
+                    }
+                } else {
+                    widgets.push(text("No matching devices found").into());
+                }
+
+                if !is_root() {
+                    #[cfg(target_os = "linux")]
+                    let page = Message::SudoSubmit;
+                    #[cfg(target_os = "redox")]
+                    let page = Message::SudoInput(String::new());
+
+                    widgets.push(space::vertical().into());
+                    widgets.push(
+                        row![
+                            text("Superuser permission is required to install to devices."),
+                            space::horizontal(),
+                            button::suggested("Ask root access").on_press(page),
+                        ]
+                        .into(),
+                    );
+                }
+            }
+            Page::ImageConfig {
+                path,
+                size,
+                skip_partition,
+            } => {
+                widgets.push(text("Configure Image File").size(24).into());
+                widgets.push(text("Image Path:").into());
+                widgets.push(
+                    row![
+                        text_input("e.g. redox.img", path).on_input(Message::ImagePathInput),
+                        if cfg!(target_os = "linux") {
+                            button::standard("Browse").on_press(Message::ImageBrowse)
+                        } else {
+                            button::standard("")
+                        },
+                    ]
+                    .spacing(8)
+                    .into(),
+                );
+
+                widgets.push(text("Image Size (MB):").into());
+                widgets.push(
+                    text_input("Size in MB (e.g. 1024)", size)
+                        .on_input(Message::ImageSizeInput)
+                        .into(),
+                );
+
+                widgets.push(checkbox(*skip_partition).label("Skip Partition?").into());
+
+                if !path.is_empty() && size.parse::<u64>().is_ok() {
+                    widgets.push(space::vertical().into());
+                    widgets.push(
+                        button::suggested("Next")
+                            .on_press(Message::ImageConfirm)
+                            .into(),
+                    );
+                }
+            }
+            Page::Profile { selected, .. } => {
+                widgets.push(text("Select System Profile").size(24).into());
+                #[cfg(target_os = "redox")]
+                {
+                    widgets.push(
+                        radio(
+                            "Clone this OS",
+                            InstallConfigKind::Clone,
+                            Some(selected.kind),
+                            Message::ProfileChoose,
+                        )
+                        .into(),
+                    );
+                }
+                widgets.push(
+                    radio(
+                        "Desktop",
+                        InstallConfigKind::Desktop,
+                        Some(selected.kind),
+                        Message::ProfileChoose,
+                    )
+                    .into(),
+                );
+                widgets.push(
+                    radio(
+                        "Server",
+                        InstallConfigKind::Server,
+                        Some(selected.kind),
+                        Message::ProfileChoose,
+                    )
+                    .into(),
+                );
+                widgets.push(
+                    checkbox(selected.live_disk)
+                        .label("Install as live disk")
+                        .on_toggle(Message::ProfileChooseLive)
+                        .into(),
+                );
+
+                widgets.push(
+                    checkbox(selected.password_opt.is_some())
+                        .label("Enable disk encryption password")
+                        .on_toggle(Message::ProfileChoosePassword)
+                        .into(),
+                );
+                match selected.password_opt.as_ref() {
+                    Some(pass) => widgets.push(
+                        text_input("", pass)
+                            .on_input(Message::ProfileEnterPassword)
+                            .secure(true)
+                            .into(),
+                    ),
+                    None => {}
+                }
+
+                widgets.push(space::vertical().into());
+                widgets.push(
+                    button::destructive("Start Installation")
+                        .on_press(Message::ProfileConfirm)
+                        .into(),
+                );
+            }
             Page::Sudo(password) => {
                 widgets.push(text("Enter your password:").into());
                 widgets.push(
@@ -539,65 +670,6 @@ impl Application for Window {
                         .on_submit(Message::SudoSubmit)
                         .into(),
                 );
-            }
-            Page::Disk(disk_i_opt) => {
-                if !self.disk_paths.is_empty() {
-                    if is_root() {
-                        widgets.push(text("Choose a drive:").size(24).into());
-
-                        for (disk_i, (disk_path, is_partition, disk_size)) in
-                            self.disk_paths.iter().enumerate()
-                        {
-                            if !is_partition {
-                                widgets.push(
-                                    row![
-                                        radio(
-                                            text(disk_path),
-                                            disk_i,
-                                            *disk_i_opt,
-                                            Message::DiskChoose
-                                        ),
-                                        space::horizontal(),
-                                        text(redox_installer::format_bytes(*disk_size)),
-                                    ]
-                                    .into(),
-                                );
-                            }
-                        }
-
-                        if let Some(disk_i) = *disk_i_opt {
-                            widgets.push(space::vertical().into());
-                            widgets.push(
-                                row![
-                                    space::horizontal(),
-                                    button::destructive("Confirm")
-                                        .on_press(Message::DiskConfirm(disk_i)),
-                                ]
-                                .into(),
-                            );
-                        }
-                    } else {
-                        #[cfg(target_os = "linux")]
-                        let page = Message::SudoSubmit;
-
-                        #[cfg(target_os = "redox")]
-                        let page = Message::SudoInput(String::new());
-
-                        widgets.push(space::vertical().into());
-                        widgets.push(
-                            row![
-                                text("Ask superuser permission to install into drives"),
-                                space::horizontal(),
-                                button::suggested("Ask root access").on_press(page),
-                            ]
-                            .into(),
-                        );
-                    }
-                } else {
-                    widgets.push(text("No drives found").into());
-                    // TODO: expose disk.pci-*-*nvme/* */ scheme to user
-                    widgets.push(text("(try to rerun with sudo)").into());
-                }
             }
             Page::Install(progress, description) => {
                 widgets.push(text("Installation progress:").size(24).into());
@@ -622,7 +694,7 @@ impl Application for Window {
         };
 
         column::with_children(widgets)
-            .spacing(8)
+            .spacing(12)
             .padding(24)
             .align_x(Alignment::Start)
             .into()
