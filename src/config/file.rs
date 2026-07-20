@@ -66,7 +66,7 @@ impl Display for FileConfig {
                 write!(f, " chown=yes")?;
             }
         } else {
-            write!(f, " size={}", crate::format_bytes(self.data.len() as u64))?;
+            write!(f, " size={}", format_bytes(self.data.len() as u64))?;
             if self.postinstall {
                 write!(f, "!")?;
             }
@@ -85,4 +85,34 @@ impl Display for FileConfig {
         }
         Ok(())
     }
+}
+
+/// Convert bytes into readable string
+pub fn format_bytes(len: u64) -> String {
+    const GB: u64 = 1024 * 1024 * 1024;
+    const MB: u64 = 1024 * 1024;
+    const KB: u64 = 1024;
+
+    if len > GB {
+        format_bytes_inner(len, GB, "GB")
+    } else if len > MB {
+        format_bytes_inner(len, MB, "MB")
+    } else if len > KB {
+        format_bytes_inner(len, KB, "KB")
+    } else {
+        format!("{len} B")
+    }
+}
+
+fn format_bytes_inner(len: u64, divisor: u64, suffix: &'static str) -> String {
+    use std::fmt::Write;
+    let mut s = format!("{}", len / divisor);
+    if s.len() == 1 {
+        let _ = write!(s, ".{:02}", (len % divisor) / (divisor / 100));
+    } else if s.len() == 2 {
+        let _ = write!(s, ".{:01}", (len % divisor) / (divisor / 10));
+    }
+
+    let _ = write!(s, " {suffix}");
+    s
 }

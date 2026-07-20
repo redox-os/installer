@@ -19,6 +19,7 @@ libredox = "0.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
+rfd = "0.14" # TODO: redox
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"

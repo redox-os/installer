@@ -9,6 +9,7 @@ mod installer;
 #[cfg(feature = "installer")]
 pub use crate::installer::*;
 
+pub use crate::config::file::format_bytes;
 pub use crate::config::file::FileConfig;
 pub use crate::config::package::PackageConfig;
 pub use crate::config::Config;
