@@ -116,7 +116,6 @@ fn main() {
         .add_opt("", "write-bootloader")
         .add_flag(&["skip-partition"])
         .add_flag(&["filesystem-size"])
-        .add_flag(&["r", "repo-binary"]) // TODO: Remove
         .add_flag(&["l", "list-packages"])
         .add_flag(&["live"])
         .add_flag(&["no-mount"]);
