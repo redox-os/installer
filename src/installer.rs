@@ -137,13 +137,26 @@ fn install_packages(config: &Config, dest: &Path, cookbook: Option<&str>) -> any
 }
 
 pub fn install_dir(
-    config: Config,
+    mut config: Config,
     output_dir: impl AsRef<Path>,
     cookbook: Option<&str>,
 ) -> Result<()> {
-    let output_dir = output_dir.as_ref();
+    let output_dir = output_dir.as_ref().to_owned();
 
-    let output_dir = output_dir.to_owned();
+    if let Some(cookbook) = cookbook.as_ref() {
+        match fs::read_to_string(&Path::new(cookbook).join("build/id_ed25519.pub.toml")) {
+            Ok(data) => {
+                config.files.push(FileConfig {
+                    path: "etc/pkg/id_ed25519.pub.toml".to_string(),
+                    data,
+                    ..Default::default()
+                });
+            }
+            Err(e) => {
+                bail!("Missing cookbook build/id_ed25519.pub.toml: {e:?}");
+            }
+        }
+    }
 
     for file in &config.files {
         if !file.postinstall {
